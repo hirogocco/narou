@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v2 — GitHub Pages 配信版
+   v3 — GitHub Pages 配信版
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -135,7 +135,7 @@
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
     #vreader-track {
-      position: absolute; top: 4vh; right: 14vw; bottom: 6vh; left: 14vw;
+      position: absolute; top: 0; right: 0; bottom: 0; left: 0;
       display: flex; flex-direction: row-reverse; align-items: stretch;
       transition: transform .28s ease;
       will-change: transform;
@@ -144,6 +144,7 @@
       flex-shrink: 0;
       height: 100%;
       writing-mode: vertical-rl;
+      padding: 4vh 10vw 6vh 10vw;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
       line-height: 1.9;
@@ -158,7 +159,8 @@
       flex-shrink: 0;
       height: 100%;
       writing-mode: horizontal-tb;
-      padding: 4vh 4vw 6vh 4vw; box-sizing: border-box;
+      padding: 4vh 10vw 6vh 10vw;
+      box-sizing: border-box;
       display: flex; flex-direction: column;
       font-family: sans-serif;
     }
@@ -217,9 +219,9 @@
   let pageWidth = 0;
 
   function measure() {
-    pageWidth = track.clientWidth;
+    pageWidth = window.innerWidth;
     bodyWrap.style.minWidth = '';
-    endPage.style.width  = pageWidth + 'px';
+    endPage.style.width = pageWidth + 'px';
     const w = bodyWrap.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(w / pageWidth));
     bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
