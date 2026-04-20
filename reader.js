@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v3 — GitHub Pages 配信版
+   v4 — column方式
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -87,20 +87,20 @@
   root.id = 'vreader-root';
   root.dataset.theme = cfg.theme;
   root.innerHTML = `
-    <div id="vreader-track">
-      <div id="vreader-body-wrap"><div id="vreader-body"></div></div>
-      <div id="vreader-end">
-        <div class="vr-end-title">${ title ? '― ' + escapeHtml(title) + ' 終わり ―' : '― このエピソードはここまで ―' }</div>
-        <div class="vr-end-ads"></div>
-        <nav class="vr-end-nav">
-          ${ prevHref ? `<a href="${escapeHtml(prevHref)}">← 前話</a>`
-                      : '<span class="vr-disabled">← 前話</span>' }
-          <a href="javascript:history.back()">目次</a>
-          ${ nextHref ? `<a href="${escapeHtml(nextHref)}" class="vr-next">次話 →</a>`
-                      : '<span class="vr-disabled">完結／未投稿</span>' }
-        </nav>
-        <div class="vr-end-tip">${ nextHref ? '中央タップでも次話へ進めます' : '' }</div>
-      </div>
+    <div id="vreader-pager">
+      <div id="vreader-body"></div>
+    </div>
+    <div id="vreader-end" style="display:none">
+      <div class="vr-end-title">${ title ? '― ' + escapeHtml(title) + ' 終わり ―' : '― このエピソードはここまで ―' }</div>
+      <div class="vr-end-ads"></div>
+      <nav class="vr-end-nav">
+        ${ prevHref ? `<a href="${escapeHtml(prevHref)}">← 前話</a>`
+                    : '<span class="vr-disabled">← 前話</span>' }
+        <a href="javascript:history.back()">目次</a>
+        ${ nextHref ? `<a href="${escapeHtml(nextHref)}" class="vr-next">次話 →</a>`
+                    : '<span class="vr-disabled">完結／未投稿</span>' }
+      </nav>
+      <div class="vr-end-tip">${ nextHref ? '中央タップでも次話へ進めます' : '' }</div>
     </div>
     <div id="vreader-bar">
       <button data-act="font-s">小</button>
@@ -134,32 +134,32 @@
     }
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
-    #vreader-track {
-      position: absolute; top: 0; right: 0; bottom: 0; left: 0;
-      display: flex; flex-direction: row-reverse; align-items: stretch;
-      transition: transform .28s ease;
-      will-change: transform;
+
+    #vreader-pager {
+      position: absolute;
+      top: 4vh; bottom: 6vh; left: 8vw; right: 8vw;
+      overflow: hidden;
+      transition: opacity .15s;
     }
-    #vreader-body-wrap {
-      flex-shrink: 0;
-      height: 100%;
+    #vreader-body {
       writing-mode: vertical-rl;
-      padding: 4vh 10vw 6vh 10vw;
-      box-sizing: border-box;
+      height: 100%;
+      column-width: calc(100vw - 16vw);
+      column-gap: 16vw;
+      column-fill: auto;
       font-size: ${cfg.font}px;
       line-height: 1.9;
       letter-spacing: .05em;
     }
-    #vreader-body { height: 100%; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
     #vreader-body ruby rt { font-size: .5em; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
+
     #vreader-end {
-      flex-shrink: 0;
-      height: 100%;
+      position: absolute;
+      top: 4vh; bottom: 6vh; left: 8vw; right: 8vw;
       writing-mode: horizontal-tb;
-      padding: 4vh 10vw 6vh 10vw;
       box-sizing: border-box;
       display: flex; flex-direction: column;
       font-family: sans-serif;
@@ -179,6 +179,7 @@
     .vr-end-nav .vr-disabled { opacity: .3; }
     .vr-end-nav .vr-next { font-weight: bold; }
     .vr-end-tip { text-align: center; font-size: .8em; opacity: .5; }
+
     #vreader-bar {
       position: fixed; top: 0; left: 0; right: 0;
       background: rgba(0,0,0,.78); color: #fff;
@@ -207,8 +208,8 @@
   document.head.appendChild(style);
   document.body.appendChild(root);
 
-  const track    = root.querySelector('#vreader-track');
-  const bodyWrap = root.querySelector('#vreader-body-wrap');
+  const pager    = root.querySelector('#vreader-pager');
+  const bodyEl   = root.querySelector('#vreader-body');
   const endPage  = root.querySelector('#vreader-end');
   const bar      = root.querySelector('#vreader-bar');
   const info     = root.querySelector('#vreader-info');
@@ -216,15 +217,12 @@
   let curPage = 0;
   let totalPages = 0;
   let bodyPages = 0;
-  let pageWidth = 0;
 
   function measure() {
-    pageWidth = window.innerWidth;
-    bodyWrap.style.minWidth = '';
-    endPage.style.width = pageWidth + 'px';
-    const w = bodyWrap.scrollWidth;
-    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
-    bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
+    bodyEl.scrollLeft = 0;
+    const pagerWidth = pager.clientWidth;
+    const scrollWidth = bodyEl.scrollWidth;
+    bodyPages = Math.max(1, Math.round(scrollWidth / pagerWidth));
     totalPages = bodyPages + 1;
     updateInfo();
   }
@@ -233,10 +231,27 @@
     info.textContent = `${curPage + 1} / ${totalPages}`;
   }
 
+  function showBody() {
+    pager.style.display = 'block';
+    endPage.style.display = 'none';
+  }
+  function showEnd() {
+    pager.style.display = 'none';
+    endPage.style.display = 'flex';
+  }
+
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
     curPage = n;
-    track.style.transform = `translateX(${n * pageWidth}px)`;
+    if (n < bodyPages) {
+      showBody();
+      const pagerWidth = pager.clientWidth;
+      // writing-mode:vertical-rl の column は、負方向（右から左）に増える。
+      // scrollLeftは Chrome/Firefox 新版では負の値で表される。
+      bodyEl.scrollLeft = -(n * pagerWidth);
+    } else {
+      showEnd();
+    }
     updateInfo();
   }
 
@@ -265,10 +280,10 @@
     else if (act === 'font-l') cfg.font = 22;
     else if (act === 'theme')  cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')   { location.reload(); return; }
-    bodyWrap.style.fontSize = cfg.font + 'px';
+    bodyEl.style.fontSize = cfg.font + 'px';
     root.dataset.theme = cfg.theme;
     saveCfg();
-    setTimeout(() => { measure(); goTo(curPage); }, 50);
+    setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
   });
 
   if (nextHref) {
@@ -278,7 +293,7 @@
     document.head.appendChild(link);
   }
 
-  setTimeout(() => { measure(); goTo(0); }, 100);
+  setTimeout(() => { measure(); goTo(0); }, 150);
 
   let resizeTimer;
   window.addEventListener('resize', () => {
