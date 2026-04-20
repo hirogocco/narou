@@ -389,8 +389,9 @@
 
   /* -------- 設定バー -------- */
   bar.addEventListener('click', e => {
-    const act = e.target.dataset.act;
-    if (!act) return;
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const act = btn.dataset.act;
     e.stopPropagation();
     if      (act === 'font-dec') cfg.font = Math.max(10, cfg.font - 2);
     else if (act === 'font-inc') cfg.font = Math.min(40, cfg.font + 2);
