@@ -142,9 +142,9 @@
     }
     #vreader-body-wrap {
       flex-shrink: 0;
-      height: 100vh;
+      height: 88vh;
       writing-mode: vertical-rl;
-      padding: 6vh 6vw 12vh 6vw;
+      padding: 4vh 4vw;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
       line-height: 1.9;
