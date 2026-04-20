@@ -135,7 +135,7 @@
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
     #vreader-track {
-      position: absolute; top: 4vh; right: 0; bottom: 6vh;
+      position: absolute; top: 4vh; right: 4vw; bottom: 6vh; left: 4vw;
       display: flex; flex-direction: row-reverse; align-items: stretch;
       transition: transform .28s ease;
       will-change: transform;
@@ -144,7 +144,7 @@
       flex-shrink: 0;
       height: 100%;
       writing-mode: vertical-rl;
-      padding: 4vh 4vw;
+      padding: 4vh 0;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
       line-height: 1.9;
@@ -218,7 +218,7 @@
   function measure() {
     bodyWrap.style.minWidth = '';
     const w  = bodyWrap.getBoundingClientRect().width;
-    const vw = window.innerWidth;
+    const vw = track.clientWidth;
     bodyPages  = Math.max(1, Math.ceil(w / vw));
     bodyWrap.style.minWidth = (bodyPages * vw) + 'px';
     totalPages = bodyPages + 1;
@@ -230,7 +230,7 @@
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
     curPage = n;
-    track.style.transform = `translateX(${n * window.innerWidth}px)`;
+   　track.style.transform = `translateX(${n * track.clientWidth}px)`;
     updateInfo();
   }
   const isOnEndPage = () => curPage === totalPages - 1;
