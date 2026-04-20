@@ -131,6 +131,8 @@
       z-index: 2147483647 !important; overflow: hidden !important;
       font-family: "Hiragino Mincho ProN", "YuMincho", "Yu Mincho", serif;
       transition: background .2s, color .2s;
+      padding: 4vh 0 6vh 0 !important;
+　　  box-sizing: border-box !important;
     }
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
@@ -142,7 +144,7 @@
     }
     #vreader-body-wrap {
       flex-shrink: 0;
-      height: 80vh;
+      height: 100%;
       writing-mode: vertical-rl;
       padding: 4vh 4vw;
       box-sizing: border-box;
@@ -157,7 +159,7 @@
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
     #vreader-end {
       flex-shrink: 0;
-      width: 100vw; height: 100vh;
+      width: 100vw; height: 100%;
       writing-mode: horizontal-tb;
       padding: 6vh 8vw 14vh 8vw; box-sizing: border-box;
       display: flex; flex-direction: column;
