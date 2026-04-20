@@ -150,7 +150,7 @@
       line-height: 1.9;
       letter-spacing: .05em;
     }
-    #vreader-body { height: 100%; }
+    #vreader-body { height: 100%; padding-top: 3vh; padding-bottom: 3vh; box-sizing: border-box; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
     #vreader-body ruby rt { font-size: .5em; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
