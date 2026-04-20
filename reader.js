@@ -107,9 +107,8 @@
       </div>
     </div>
     <div id="vreader-bar">
-      <button data-act="font-s">小</button>
-      <button data-act="font-m">中</button>
-      <button data-act="font-l">大</button>
+      <button data-act="font-dec">A−</button>
+      <button data-act="font-inc">A＋</button>
       <button data-act="theme">配色</button>
       <button data-act="exit">×</button>
     </div>
@@ -393,11 +392,10 @@
     const act = e.target.dataset.act;
     if (!act) return;
     e.stopPropagation();
-    if      (act === 'font-s') cfg.font = 16;
-    else if (act === 'font-m') cfg.font = 18;
-    else if (act === 'font-l') cfg.font = 22;
-    else if (act === 'theme')  cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
-    else if (act === 'exit')   { location.reload(); return; }
+    if      (act === 'font-dec') cfg.font = Math.max(10, cfg.font - 2);
+    else if (act === 'font-inc') cfg.font = Math.min(40, cfg.font + 2);
+    else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
+    else if (act === 'exit')     { location.reload(); return; }
     bodyWrap.style.fontSize = cfg.font + 'px';
     root.dataset.theme = cfg.theme;
     saveCfg();
