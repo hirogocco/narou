@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v1 — GitHub Pages 配信版
+   v2 — GitHub Pages 配信版
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -55,9 +55,9 @@
   try {
     const s = localStorage.getItem(SK);
     if (s) Object.assign(cfg, JSON.parse(s));
-  } catch (e) { /* ignore */ }
+  } catch (e) {}
   const saveCfg = () => {
-    try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) { /* ignore */ }
+    try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) {}
   };
 
   function applyTcy(node) {
@@ -135,7 +135,7 @@
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
     #vreader-track {
-      position: absolute; top: 4vh; right: 8vw; bottom: 6vh; left: 8vw;
+      position: absolute; top: 4vh; right: 6vw; bottom: 6vh; left: 6vw;
       display: flex; flex-direction: row-reverse; align-items: stretch;
       transition: transform .28s ease;
       will-change: transform;
@@ -144,7 +144,6 @@
       flex-shrink: 0;
       height: 100%;
       writing-mode: vertical-rl;
-      padding: 4vh 0;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
       line-height: 1.9;
@@ -157,27 +156,27 @@
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
     #vreader-end {
       flex-shrink: 0;
-      width: 100vw; height: 100%;
+      height: 100%;
       writing-mode: horizontal-tb;
-      padding: 6vh 8vw 14vh 8vw; box-sizing: border-box;
+      padding: 4vh 4vw 6vh 4vw; box-sizing: border-box;
       display: flex; flex-direction: column;
       font-family: sans-serif;
     }
-    .vr-end-title  { text-align: center; font-size: 1.1em; margin-bottom: 4vh; opacity: .85; }
+    .vr-end-title { text-align: center; font-size: 1.1em; margin-bottom: 4vh; opacity: .85; }
     .vr-end-ads {
       flex: 1; display: flex; align-items: center; justify-content: center;
       min-height: 0; overflow: hidden; margin-bottom: 4vh;
     }
     .vr-end-ads > * { max-width: 100% !important; max-height: 100% !important; }
-    .vr-end-nav    { display: flex; gap: 3vw; margin-bottom: 2vh; }
+    .vr-end-nav { display: flex; gap: 3vw; margin-bottom: 2vh; }
     .vr-end-nav a, .vr-end-nav span {
       flex: 1; padding: 1em 0; text-align: center;
       border: 1px solid currentColor; border-radius: 6px;
       text-decoration: none; color: inherit; font-size: .95em;
     }
     .vr-end-nav .vr-disabled { opacity: .3; }
-    .vr-end-nav .vr-next     { font-weight: bold; }
-    .vr-end-tip    { text-align: center; font-size: .8em; opacity: .5; }
+    .vr-end-nav .vr-next { font-weight: bold; }
+    .vr-end-tip { text-align: center; font-size: .8em; opacity: .5; }
     #vreader-bar {
       position: fixed; top: 0; left: 0; right: 0;
       background: rgba(0,0,0,.78); color: #fff;
@@ -208,31 +207,38 @@
 
   const track    = root.querySelector('#vreader-track');
   const bodyWrap = root.querySelector('#vreader-body-wrap');
+  const endPage  = root.querySelector('#vreader-end');
   const bar      = root.querySelector('#vreader-bar');
   const info     = root.querySelector('#vreader-info');
 
   let curPage = 0;
   let totalPages = 0;
   let bodyPages = 0;
+  let pageWidth = 0;
 
   function measure() {
+    pageWidth = track.clientWidth;
     bodyWrap.style.minWidth = '';
-    const w  = bodyWrap.getBoundingClientRect().width;
-    const vw = track.clientWidth;
-    bodyPages  = Math.max(1, Math.ceil(w / vw));
-    bodyWrap.style.minWidth = (bodyPages * vw) + 'px';
+    bodyWrap.style.width = pageWidth + 'px';
+    endPage.style.width  = pageWidth + 'px';
+    const w = bodyWrap.scrollWidth;
+    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
+    bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
     totalPages = bodyPages + 1;
     updateInfo();
   }
+
   function updateInfo() {
     info.textContent = `${curPage + 1} / ${totalPages}`;
   }
+
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
     curPage = n;
-   　track.style.transform = `translateX(${n * track.clientWidth}px)`;
+    track.style.transform = `translateX(${n * pageWidth}px)`;
     updateInfo();
   }
+
   const isOnEndPage = () => curPage === totalPages - 1;
 
   function onTap(e) {
