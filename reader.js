@@ -131,13 +131,11 @@
       z-index: 2147483647 !important; overflow: hidden !important;
       font-family: "Hiragino Mincho ProN", "YuMincho", "Yu Mincho", serif;
       transition: background .2s, color .2s;
-      padding: 4vh 0 6vh 0 !important;
-　　  box-sizing: border-box !important;
     }
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
     #vreader-track {
-      position: absolute; top: 0; right: 0; bottom: 0;
+      position: absolute; top: 4vh; right: 0; bottom: 6vh;
       display: flex; flex-direction: row-reverse; align-items: stretch;
       transition: transform .28s ease;
       will-change: transform;
