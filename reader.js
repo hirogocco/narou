@@ -107,7 +107,7 @@
       </div>
     </div>
     <div id="vreader-bar">
-      <button data-act="font-dec">A−</button>
+      <button data-act="font-dec">a−</button>
       <button data-act="font-inc">A＋</button>
       <button data-act="theme">配色</button>
       <button data-act="exit">×</button>
@@ -393,8 +393,8 @@
     if (!btn) return;
     const act = btn.dataset.act;
     e.stopPropagation();
-    if      (act === 'font-dec') cfg.font = Math.max(10, cfg.font - 10);
-    else if (act === 'font-inc') cfg.font = Math.min(100, cfg.font + 10);
+    if      (act === 'font-dec') cfg.font = Math.max(50, cfg.font - 50);
+    else if (act === 'font-inc') cfg.font = Math.min(500, cfg.font + 50);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
     bodyWrap.style.fontSize = cfg.font + 'px';
