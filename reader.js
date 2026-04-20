@@ -219,7 +219,6 @@
   function measure() {
     pageWidth = track.clientWidth;
     bodyWrap.style.minWidth = '';
-    bodyWrap.style.width = pageWidth + 'px';
     endPage.style.width  = pageWidth + 'px';
     const w = bodyWrap.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(w / pageWidth));
