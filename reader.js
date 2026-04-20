@@ -142,7 +142,7 @@
     }
     #vreader-body-wrap {
       flex-shrink: 0;
-      height: 88vh;
+      height: 80vh;
       writing-mode: vertical-rl;
       padding: 4vh 4vw;
       box-sizing: border-box;
@@ -150,7 +150,7 @@
       line-height: 1.9;
       letter-spacing: .05em;
     }
-    #vreader-body { height: 100%; padding-top: 3vh; padding-bottom: 3vh; box-sizing: border-box; }
+    #vreader-body { height: 100%; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
     #vreader-body ruby rt { font-size: .5em; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
@@ -159,7 +159,7 @@
       flex-shrink: 0;
       width: 100vw; height: 100vh;
       writing-mode: horizontal-tb;
-      padding: 6vh 8vw; box-sizing: border-box;
+      padding: 6vh 8vw 14vh 8vw; box-sizing: border-box;
       display: flex; flex-direction: column;
       font-family: sans-serif;
     }
