@@ -144,7 +144,7 @@
       flex-shrink: 0;
       height: 100vh;
       writing-mode: vertical-rl;
-      padding: 5vh 4vw;
+      padding: 10vh 6vw 12vh 6vw;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
       line-height: 1.9;
