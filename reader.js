@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v5 — track overflow:hidden 方式
+   v6 — column風overflow方式 + 次話シームレス遷移
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -42,13 +42,20 @@
     return;
   }
 
-  const sourceTitleEl = document.querySelector(sel.title);
-  const title = sourceTitleEl ? sourceTitleEl.textContent.trim() : '';
-  const nextEl = document.querySelector(sel.next);
-  const prevEl = document.querySelector(sel.prev);
-  const nextHref = (nextEl && nextEl.href) ? nextEl.href : null;
-  const prevHref = (prevEl && prevEl.href) ? prevEl.href : null;
-  const adNodes = Array.from(document.querySelectorAll(sel.ads));
+  /* -------- メタデータ抽出 -------- */
+  function extractMeta(doc) {
+    const titleEl = doc.querySelector(sel.title);
+    const nextEl  = doc.querySelector(sel.next);
+    const prevEl  = doc.querySelector(sel.prev);
+    return {
+      title:    titleEl ? titleEl.textContent.trim() : '',
+      nextHref: (nextEl && nextEl.href) ? nextEl.href : null,
+      prevHref: (prevEl && prevEl.href) ? prevEl.href : null,
+      adNodes:  Array.from(doc.querySelectorAll(sel.ads))
+    };
+  }
+
+  let currentMeta = extractMeta(document);
 
   const SK = 'vreader-settings-v1';
   let cfg = { font: 18, theme: 'light' };
@@ -83,6 +90,7 @@
       c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
   }
 
+  /* -------- DOM 構築 -------- */
   const root = document.createElement('div');
   root.id = 'vreader-root';
   root.dataset.theme = cfg.theme;
@@ -91,16 +99,10 @@
       <div id="vreader-track">
         <div id="vreader-body-wrap"><div id="vreader-body"></div></div>
         <div id="vreader-end">
-          <div class="vr-end-title">${ title ? '― ' + escapeHtml(title) + ' 終わり ―' : '― このエピソードはここまで ―' }</div>
+          <div class="vr-end-title"></div>
           <div class="vr-end-ads"></div>
-          <nav class="vr-end-nav">
-            ${ prevHref ? `<a href="${escapeHtml(prevHref)}">← 前話</a>`
-                        : '<span class="vr-disabled">← 前話</span>' }
-            <a href="javascript:history.back()">目次</a>
-            ${ nextHref ? `<a href="${escapeHtml(nextHref)}" class="vr-next">次話 →</a>`
-                        : '<span class="vr-disabled">完結／未投稿</span>' }
-          </nav>
-          <div class="vr-end-tip">${ nextHref ? '中央タップでも次話へ進めます' : '' }</div>
+          <nav class="vr-end-nav"></nav>
+          <div class="vr-end-tip"></div>
         </div>
       </div>
     </div>
@@ -112,18 +114,12 @@
       <button data-act="exit">×</button>
     </div>
     <div id="vreader-info"></div>
+    <div id="vreader-loading">読み込み中…</div>
   `;
 
   const bodyContainer = root.querySelector('#vreader-body');
   bodyContainer.appendChild(sourceBody.cloneNode(true));
   applyTcy(bodyContainer);
-
-  const adsContainer = root.querySelector('.vr-end-ads');
-  if (adNodes.length > 0) {
-    adNodes.forEach(ad => adsContainer.appendChild(ad));
-  } else {
-    adsContainer.innerHTML = '<div style="opacity:.4;font-size:.85em">（広告なし）</div>';
-  }
 
   const style = document.createElement('style');
   style.id = 'vreader-style';
@@ -139,7 +135,7 @@
 
     #vreader-frame {
       position: absolute;
-      top: 4vh; bottom: 6vh; left: 8vw; right: 8vw;
+      top: 4vh; bottom: 6vh; left: 10vw; right: 10vw;
       overflow: hidden;
     }
     #vreader-track {
@@ -209,6 +205,16 @@
       font-family: sans-serif;
       writing-mode: horizontal-tb;
     }
+    #vreader-loading {
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(0,0,0,.75); color: #fff;
+      padding: 12px 24px; border-radius: 6px;
+      font-family: sans-serif; font-size: 14px;
+      z-index: 20;
+      display: none;
+    }
+    #vreader-loading.show { display: block; }
   `;
 
   document.documentElement.style.overflow = 'hidden';
@@ -222,12 +228,58 @@
   const endPage  = root.querySelector('#vreader-end');
   const bar      = root.querySelector('#vreader-bar');
   const info     = root.querySelector('#vreader-info');
+  const loading  = root.querySelector('#vreader-loading');
 
   let curPage = 0;
   let totalPages = 0;
   let bodyPages = 0;
   let pageWidth = 0;
 
+  /* -------- 章末ページの更新 -------- */
+  function updateEndPage() {
+    const { title, nextHref, prevHref, adNodes } = currentMeta;
+
+    root.querySelector('.vr-end-title').textContent =
+      title ? '― ' + title + ' 終わり ―' : '― このエピソードはここまで ―';
+
+    const nav = root.querySelector('.vr-end-nav');
+    nav.innerHTML = `
+      ${ nextHref ? `<a href="${escapeHtml(nextHref)}" class="vr-next" data-nav="next">次話 →</a>`
+                  : '<span class="vr-disabled">完結／未投稿</span>' }
+      <a href="#" data-nav="index">目次</a>
+      ${ prevHref ? `<a href="${escapeHtml(prevHref)}" data-nav="prev">← 前話</a>`
+                  : '<span class="vr-disabled">← 前話</span>' }
+    `;
+
+    root.querySelector('.vr-end-tip').textContent =
+      nextHref ? '左端タップでも次話へ進めます' : '';
+
+    const adsContainer = root.querySelector('.vr-end-ads');
+    adsContainer.innerHTML = '';
+    if (adNodes && adNodes.length > 0) {
+      adNodes.forEach(ad => adsContainer.appendChild(ad));
+    } else {
+      adsContainer.innerHTML = '<div style="opacity:.4;font-size:.85em">（広告なし）</div>';
+    }
+
+    // 次話の先読み
+    let prefetch = document.head.querySelector('link[data-vreader-prefetch]');
+    if (nextHref) {
+      if (!prefetch) {
+        prefetch = document.createElement('link');
+        prefetch.rel = 'prefetch';
+        prefetch.dataset.vreaderPrefetch = '1';
+        document.head.appendChild(prefetch);
+      }
+      prefetch.href = nextHref;
+    } else if (prefetch) {
+      prefetch.remove();
+    }
+  }
+
+  updateEndPage();
+
+  /* -------- ページ計測 -------- */
   function measure() {
     pageWidth = frame.clientWidth;
     bodyWrap.style.minWidth = '';
@@ -252,20 +304,91 @@
 
   const isOnEndPage = () => curPage === totalPages - 1;
 
+  /* -------- エピソード遷移（シームレス） -------- */
+  let loadingEpisode = false;
+  async function loadEpisode(url) {
+    if (loadingEpisode) return;
+    loadingEpisode = true;
+    loading.classList.add('show');
+
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const html = await res.text();
+      const doc  = new DOMParser().parseFromString(html, 'text/html');
+
+      const newBody = doc.querySelector(sel.body);
+      if (!newBody) throw new Error('body not found');
+
+      // 本文を差し替え
+      bodyContainer.innerHTML = '';
+      bodyContainer.appendChild(newBody.cloneNode(true));
+      applyTcy(bodyContainer);
+
+      // メタ情報を新しいDOMから取り直す
+      currentMeta = extractMeta(doc);
+      updateEndPage();
+
+      // ブラウザ履歴を更新
+      history.pushState({ vreader: true }, '', url);
+      // タイトルも更新
+      if (currentMeta.title) document.title = currentMeta.title;
+
+      // スクロールを先頭に戻し、再計測
+      bodyWrap.scrollTop = 0;
+      setTimeout(() => {
+        measure();
+        curPage = 0;
+        goTo(0);
+        loading.classList.remove('show');
+        loadingEpisode = false;
+      }, 50);
+
+    } catch (err) {
+      console.error('[vreader] loadEpisode error:', err);
+      loading.classList.remove('show');
+      loadingEpisode = false;
+      // フォールバック：通常遷移
+      location.href = url;
+    }
+  }
+
+  /* -------- タップ処理 -------- */
   function onTap(e) {
-    if (e.target.closest('a, button')) return;
-    const x = e.clientX, y = e.clientY;
-    const w = window.innerWidth, h = window.innerHeight;
-    if (y < h * 0.12) { bar.classList.toggle('show'); return; }
-    if (isOnEndPage() && nextHref && x > w * 0.2 && x < w * 0.8) {
-      location.href = nextHref;
+    // 章末ページのナビリンクは loadEpisode で処理
+    const navLink = e.target.closest('[data-nav]');
+    if (navLink) {
+      e.preventDefault();
+      const type = navLink.dataset.nav;
+      if (type === 'next' && currentMeta.nextHref) {
+        loadEpisode(currentMeta.nextHref);
+      } else if (type === 'prev' && currentMeta.prevHref) {
+        loadEpisode(currentMeta.prevHref);
+      } else if (type === 'index') {
+        history.back();
+      }
       return;
     }
-    if (x < w / 3) goTo(curPage + 1);
-    else if (x > w * 2 / 3) goTo(curPage - 1);
+
+    if (e.target.closest('a, button')) return;
+
+    const x = e.clientX, y = e.clientY;
+    const w = window.innerWidth, h = window.innerHeight;
+
+    if (y < h * 0.12) { bar.classList.toggle('show'); return; }
+
+    // 章末ページ：左1/3タップで次話（一貫性のため）
+    if (isOnEndPage() && currentMeta.nextHref && x < w / 3) {
+      loadEpisode(currentMeta.nextHref);
+      return;
+    }
+
+    if (x < w / 3)             goTo(curPage + 1);
+    else if (x > w * 2 / 3)    goTo(curPage - 1);
   }
   root.addEventListener('click', onTap);
 
+  /* -------- 設定バー -------- */
   bar.addEventListener('click', e => {
     const act = e.target.dataset.act;
     if (!act) return;
@@ -281,13 +404,18 @@
     setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
   });
 
-  if (nextHref) {
-    const link = document.createElement('link');
-    link.rel  = 'prefetch';
-    link.href = nextHref;
-    document.head.appendChild(link);
-  }
+  /* -------- ブラウザの戻る/進む対応 -------- */
+  window.addEventListener('popstate', (e) => {
+    // pushStateで作った履歴から戻る/進むがあった場合、現在のURLの内容を読み込み直す
+    if (e.state && e.state.vreader) {
+      loadEpisode(location.href);
+    } else {
+      // リーダー起動前の状態に戻った場合はリロード
+      location.reload();
+    }
+  });
 
+  /* -------- 起動 & リサイズ -------- */
   setTimeout(() => { measure(); goTo(0); }, 150);
 
   let resizeTimer;
