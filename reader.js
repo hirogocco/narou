@@ -149,7 +149,7 @@
       writing-mode: vertical-rl;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
-      letter-spacing: .001em;
+      letter-spacing: .01em;
     }
     #vreader-body { height: 100%; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
