@@ -363,7 +363,7 @@
     // 1ページに入る列数（切り捨て）
     const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
-    stepWidth = pageWidth;  // オーバーラップなし
+    stepWidth = pageWidth - columnWidth;  // 最右列を次ページの最右に持ってくる
 
     // scrollerの幅を pageWidth ぴったりに固定して中央配置
     const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
