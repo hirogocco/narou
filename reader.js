@@ -278,9 +278,28 @@
      1列の幅を実測（見切れ根絶の鍵）
      =================================================================== */
   function measureColumnWidth() {
-    const lh = parseFloat(getComputedStyle(bodyWrap).lineHeight);
+    const N = 20;
+    const test = document.createElement('div');
+    test.style.cssText = `
+      position: absolute;
+      left: -9999px; top: 0;
+      visibility: hidden;
+      writing-mode: vertical-rl;
+      font-size: ${cfg.font}px;
+      line-height: ${cfg.font + 14}px;
+      letter-spacing: 0.1em;
+      -webkit-text-size-adjust: none;
+      text-size-adjust: none;
+      height: 100px;
+      box-sizing: border-box;
+    `;
+    test.innerHTML = '<p style="margin:0;padding:0">a</p>'.repeat(N);
+    document.body.appendChild(test);
+    const width = test.scrollWidth;
+    document.body.removeChild(test);
+    const measured = width / N;
     const fallback = cfg.font + 14;
-    return isFinite(lh) && lh > 0 ? lh : fallback;  // 切り上げしない
+    return isFinite(measured) && measured > 0 ? measured : fallback;
   }
 
   /* ===================================================================
