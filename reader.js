@@ -211,26 +211,30 @@
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
 
-    #vreader-scroller {
+   #vreader-scroller {
       position: absolute;
       top: 4vh; bottom: 6vh; left: 10vw; right: 10vw;
       overflow-x: auto;
       overflow-y: hidden;
-      writing-mode: vertical-rl;
+      direction: rtl;
       scroll-behavior: smooth;
       -webkit-overflow-scrolling: auto;
       touch-action: pan-x;
       scrollbar-width: none;
       -ms-overflow-style: none;
     }
+
     #vreader-scroller::-webkit-scrollbar { display: none; }
 
-    #vreader-body {
+   #vreader-body {
       height: 100%;
+      writing-mode: vertical-rl;
+      direction: ltr;
       letter-spacing: 0.1em;
       -webkit-text-size-adjust: none;
       text-size-adjust: none;
     }
+
     #vreader-body p { margin: 0; text-indent: 1em; }
     #vreader-body br { display: block; content: ""; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
