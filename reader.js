@@ -339,18 +339,13 @@
      =================================================================== */
   function measure() {
     const parentWidth = root.clientWidth;
-    const targetFrameWidth = parentWidth * 0.8;
-    const columnWidth = measureColumnWidth();
-    const columnsPerPage = Math.max(1, Math.floor(targetFrameWidth / columnWidth));
-    pageWidth = columnsPerPage * columnWidth;
+    pageWidth = Math.floor(parentWidth * 0.8);  // frameと一致、列幅整数倍にしない
 
-    // frame を pageWidth ぴったりに、中央配置
     const sideMargin = (parentWidth - pageWidth) / 2;
     frame.style.left = sideMargin + 'px';
     frame.style.right = sideMargin + 'px';
     frame.style.width = pageWidth + 'px';
 
-    // マスクの幅も sideMargin + 少しの buffer で、frameの余白+内側を覆う
     const maskWidth = sideMargin + 12;
     maskL.style.width = maskWidth + 'px';
     maskR.style.width = maskWidth + 'px';
@@ -368,6 +363,7 @@
     totalPages = bodyPages + 1;
     updateInfo();
   }
+  
 
   function updateInfo() {
     info.textContent = `${curPage + 1} / ${totalPages}`;
