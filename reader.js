@@ -57,7 +57,7 @@
 
   let currentMeta = extractMeta(document);
 
-  const SK = 'vreader-settings-v1';
+  const SK = 'vreader-settings-v2';
   let cfg = { font: 18, theme: 'light' };
   try {
     const s = localStorage.getItem(SK);
@@ -149,7 +149,9 @@
       writing-mode: vertical-rl;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
-      letter-spacing: .01em;
+      letter-spacing: 0.1em;
+      -webkit-text-size-adjust: none;
+      text-size-adjust: none;  
     }
     #vreader-body { height: 100%; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
@@ -392,8 +394,8 @@
     if (!btn) return;
     const act = btn.dataset.act;
     e.stopPropagation();
-    if      (act === 'font-dec') cfg.font = Math.max(200, cfg.font - 50);
-    else if (act === 'font-inc') cfg.font = Math.min(1000, cfg.font + 50);
+    if      (act === 'font-dec') cfg.font = Math.max(20, cfg.font - 5);
+    else if (act === 'font-inc') cfg.font = Math.min(100, cfg.font + 5);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
     bodyWrap.style.fontSize = cfg.font + 'px';
