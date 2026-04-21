@@ -367,7 +367,10 @@
       endPage.classList.remove('show');
       scroller.style.display = 'block';
       const target = n * pageWidth;
-      scroller.scrollTo({ left: target, behavior: 'smooth' });
+      scroller.scrollTo({ left: -(n * pageWidth), behavior: 'smooth' });
+// goToInstant の方も
+scroller.scrollLeft = -(n * pageWidth);
+
     } else {
       endPage.classList.add('show');
     }
