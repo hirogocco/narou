@@ -199,8 +199,8 @@
       <div class="vr-end-tip"></div>
     </div>
     <div id="vreader-bar">
-      <button data-act="prev-ep">← 前話</button>
-      <button data-act="next-ep">次話 →</button>
+      <button data-act="next-ep">← 次話</button>
+      <button data-act="prev-ep">前話 →</button>      
       <button data-act="font-dec">a−</button>
       <button data-act="font-inc">A＋</button>
       <button data-act="theme">配色</button>
