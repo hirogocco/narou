@@ -722,11 +722,13 @@
     const act = btn.dataset.act;
     e.stopPropagation();
 
-   if      (act === 'prev-ep') {
-      if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
-      bar.classList.remove('show');
-      return;
-    }
+   if (act === 'prev-ep') {
+  alert('prev-ep tapped\nprevHref = ' + currentMeta.prevHref);
+  if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
+  bar.classList.remove('show');
+  return;
+}
+
     else if (act === 'next-ep') {
       if (currentMeta.nextHref) loadEpisode(currentMeta.nextHref);
       bar.classList.remove('show');
