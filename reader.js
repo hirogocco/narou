@@ -1,825 +1,389 @@
-/* ======================================================================
-   縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v14 — 列数ベースサイジング方式
-         画面サイズが変わっても、1ページあたりの列数（＝情報密度）を維持。
-         画面が広くなれば文字も比例して大きくなる。
-   ---------------------------------------------------------------------- */
+/* ============================================================
+ * Manga Spread Viewer
+ * Version: 1.2.0
+ * Updated: 2026-04-21
+ *
+ * Changelog:
+ *   1.2.0 - 「次の章へ」を iframe 方式に変更。裏で次章を読み込み、
+ *           画像URLが揃うのをポーリングで待機してビューアに追加。
+ *           ページ遷移なしでシームレスに継続。
+ *           失敗時は v1.1.0 の通常遷移+再起動方式に自動フォールバック。
+ *   1.1.0 - sessionStorage 経由で遷移後の継続を検知、トースト表示。
+ *   1.0.0 - 初回リリース。見開き・タップ操作・閉じる・ずらす。
+ * ============================================================ */
 
-(function () {
-  'use strict';
+(() => {
+  const VERSION = '1.2.0';
+  const RESUME_KEY = '__mv_resume_v1';
+  const RESUME_TTL = 2 * 60 * 1000;
+  const IFRAME_MAX_WAIT_MS = 12000;
+  const IFRAME_POLL_INTERVAL_MS = 500;
+  const IFRAME_STABLE_CHECKS_REQUIRED = 2;
 
-  /* ===================================================================
-     サイト判定 & セレクタ定義
-     =================================================================== */
-  const host = location.hostname;
-  let SITE = null;
-  if (host.indexOf('syosetu.com') >= 0) SITE = 'narou';
-  else if (host.indexOf('kakuyomu.jp') >= 0) SITE = 'kakuyomu';
+  if (document.getElementById('__mv_viewer')) return;
 
-  if (!SITE) {
-    alert('縦書きリーダー：\nなろう／カクヨムのエピソードページで使ってください');
-    return;
-  }
+  const SELECTORS = [
+    '.page-chapter img',
+    'div[id^="page_"] img',
+    '#readerarea img',
+    '.chapter-container img',
+  ];
 
-  const SEL = {
-    narou: {
-      body:  '.p-novel__body, #novel_honbun',
-      title: '.p-novel__title, .novel_subtitle',
-      next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
-      prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
-      ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'
-    },
-    kakuyomu: {
-      body:  '.widget-episodeBody',
-      title: '.widget-episodeTitle',
-      next:  '#contentMain-readNextEpisode, [data-type="next-page-link"], a[rel="next"]',
-      prev:  '[data-type="prev-page-link"], a[rel="prev"]',
-      ads:   '[id*="ad-"], iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'
+  const extractImageUrls = (rootDoc) => {
+    let imgs = [];
+    for (const sel of SELECTORS) {
+      imgs = Array.from(rootDoc.querySelectorAll(sel));
+      if (imgs.length > 0) break;
     }
-  };
-  const sel = SEL[SITE];
-
-  /* ===================================================================
-     既存起動チェック & ソース本文取得
-     =================================================================== */
-  if (document.getElementById('vreader-root')) { location.reload(); return; }
-
-  const sourceBody = document.querySelector(sel.body);
-  if (!sourceBody) {
-    alert('縦書きリーダー：\n本文要素が見つかりませんでした。\nセレクタの更新が必要です。');
-    return;
-  }
-
-  /* ===================================================================
-     設定（localStorage）
-       v3: cfg.columnsPerPage（1ページあたりの列数）を保存
-       v2: cfg.font（フォントピクセル値）から自動移行
-     =================================================================== */
-  const SK = 'vreader-settings-v3';
-  const REFERENCE_WIDTH = 412;  // 典型的なスマホ幅（移行計算の基準）
-  let cfg = { columnsPerPage: 10, theme: 'light' };
-  try {
-    const s = localStorage.getItem(SK);
-    if (s) {
-      Object.assign(cfg, JSON.parse(s));
-    } else {
-      // v2 からの移行
-      const oldStr = localStorage.getItem('vreader-settings-v2');
-      if (oldStr) {
-        const old = JSON.parse(oldStr);
-        if (typeof old.font === 'number') {
-          const refAvail = REFERENCE_WIDTH * 0.8;
-          const refColW = old.font + 14;
-          cfg.columnsPerPage = Math.max(5, Math.min(40, Math.round(refAvail / refColW)));
-        }
-        if (old.theme) cfg.theme = old.theme;
-      }
-    }
-  } catch (e) {}
-  const saveCfg = () => {
-    try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) {}
+    return imgs
+      .map(i => i.dataset.original || i.dataset.cdn || i.dataset.src || i.src)
+      .filter(Boolean);
   };
 
-  /* ===================================================================
-     画面幅から実効フォントサイズを決定
-     =================================================================== */
-  let effectiveFont = 18;  // updateEffectiveFont() で更新される
-
-  function updateEffectiveFont() {
-    const viewportWidth = window.innerWidth;
-    const availableWidth = viewportWidth * 0.8;
-    // columnWidth = font + 14 の逆算
-    let f = (availableWidth / cfg.columnsPerPage) - 14;
-    // 極端な値をクランプ
-    f = Math.max(8, Math.min(60, f));
-    effectiveFont = Math.round(f);
-  }
-
-  /* ===================================================================
-     ユーティリティ
-     =================================================================== */
-  function extractMeta(doc, sourceUrl) {
-    const titleEl = doc.querySelector(sel.title);
-    const nextEl  = doc.querySelector(sel.next);
-    const prevEl  = doc.querySelector(sel.prev);
-    let nextHref = (nextEl && nextEl.href) ? nextEl.href : null;
-    let prevHref = (prevEl && prevEl.href) ? prevEl.href : null;
-
-    // なろうはURLが連番なので、DOMで取れなければURLから導出
-    if (SITE === 'narou' && sourceUrl) {
-      const m = sourceUrl.match(/^(https?:\/\/[^?#]+\/)(\d+)\/?(?:[?#].*)?$/);
-      if (m) {
-        const base = m[1];
-        const num = parseInt(m[2], 10);
-        if (!prevHref && num > 1) prevHref = `${base}${num - 1}/`;
-        // nextHref は補完しない（最終話判定が壊れるため）
-      }
-    }
-
-    return {
-      title:    titleEl ? titleEl.textContent.trim() : '',
-      nextHref,
-      prevHref,
-      adNodes:  Array.from(doc.querySelectorAll(sel.ads))
+  const findNextChapterUrl = (rootDoc, baseUrl) => {
+    const resolve = (href) => {
+      if (!href) return null;
+      try { return new URL(href, baseUrl).href; } catch { return null; }
     };
-  }
-
-  function escapeHtml(s) {
-    return String(s).replace(/[<>&"']/g,
-      c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
-  }
-
-  /* -------- 本文サニタイズ -------- */
-  function sanitizeBody(src) {
-    const out = document.createElement('div');
-
-    function appendConverted(node, container) {
-      if (node.nodeType === Node.TEXT_NODE) {
-        container.appendChild(document.createTextNode(node.nodeValue));
-        return;
-      }
-      if (node.nodeType !== Node.ELEMENT_NODE) return;
-
-      const tag = node.tagName;
-
-      if (tag === 'BR') {
-        container.appendChild(document.createElement('br'));
-      } else if (tag === 'RUBY') {
-        const ruby = document.createElement('ruby');
-        Array.from(node.childNodes).forEach(c => {
-          if (c.nodeType === Node.ELEMENT_NODE && (c.tagName === 'RT' || c.tagName === 'RP')) {
-            const rt = document.createElement(c.tagName.toLowerCase());
-            rt.textContent = c.textContent;
-            ruby.appendChild(rt);
-          } else if (c.nodeType === Node.TEXT_NODE) {
-            ruby.appendChild(document.createTextNode(c.nodeValue));
-          }
-        });
-        container.appendChild(ruby);
-      } else if (tag === 'P' || tag === 'DIV') {
-        const p = document.createElement('p');
-        Array.from(node.childNodes).forEach(c => appendConverted(c, p));
-        if (p.childNodes.length > 0) out.appendChild(p);
-      } else {
-        Array.from(node.childNodes).forEach(c => appendConverted(c, container));
-      }
+    const candidates = [
+      'a[rel="next"]',
+      'a.next',
+      '.next a',
+      '.nav-next a',
+      'a.next_page',
+    ];
+    for (const sel of candidates) {
+      const el = rootDoc.querySelector(sel);
+      const href = el && el.getAttribute('href');
+      const resolved = resolve(href);
+      if (resolved) return resolved;
     }
+    const links = Array.from(rootDoc.querySelectorAll('a'));
+    const next = links.find(a => /次|next|→|>>/i.test(a.textContent.trim()) && a.getAttribute('href'));
+    return next ? resolve(next.getAttribute('href')) : null;
+  };
 
-    let currentP = null;
-    Array.from(src.childNodes).forEach(c => {
-      if (c.nodeType === Node.ELEMENT_NODE && (c.tagName === 'P' || c.tagName === 'DIV')) {
-        appendConverted(c, out);
-        currentP = null;
-      } else {
-        if (!currentP) {
-          currentP = document.createElement('p');
-          out.appendChild(currentP);
-        }
-        appendConverted(c, currentP);
+  const urls = extractImageUrls(document);
+  if (urls.length === 0) {
+    alert('画像が見つかりませんでした。');
+    return;
+  }
+  let nextChapterUrl = findNextChapterUrl(document, location.href);
+
+  let resumedFromPrev = false;
+  try {
+    const raw = sessionStorage.getItem(RESUME_KEY);
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && typeof saved.ts === 'number' && Date.now() - saved.ts < RESUME_TTL) {
+        resumedFromPrev = true;
       }
-    });
-
-    if (out.children.length === 0) {
-      const p = document.createElement('p');
-      Array.from(src.childNodes).forEach(c => appendConverted(c, p));
-      out.appendChild(p);
+      sessionStorage.removeItem(RESUME_KEY);
     }
+  } catch {}
 
-    return out;
-  }
+  const BREAKPOINT = 600;
+  const state = { index: 0 };
 
-  function applyTcy(node) {
-    const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
-      acceptNode: n => /\d/.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
-    });
-    const targets = [];
-    while (walk.nextNode()) {
-      const n = walk.currentNode;
-      if (n.parentElement && !n.parentElement.closest('.vr-tcy')) targets.push(n);
-    }
-    targets.forEach(n => {
-      const html = n.nodeValue.replace(/(\d{1,2})(?!\d)/g, '<span class="vr-tcy">$1</span>');
-      if (html === n.nodeValue) return;
-      const tmp = document.createElement('span');
-      tmp.innerHTML = html;
-      n.replaceWith(...tmp.childNodes);
-    });
-  }
-
-  /* ===================================================================
-     状態変数
-     =================================================================== */
-  let sourceParagraphs = [];
-  let pages = [];
-  let pageDivs = [];
-  let curPage = 0;
-  let totalPages = 0;
-  let bodyPages = 0;
-  let pageWidth = 0;
-  let pageHeight = 0;
-  let columnWidth = 0;
-  let currentMeta = extractMeta(document, location.href);
-
-  /* ===================================================================
-     ソース読み込み
-     =================================================================== */
-  function loadSource(srcElement) {
-    const sanitized = sanitizeBody(srcElement);
-    applyTcy(sanitized);
-    sourceParagraphs = Array.from(sanitized.querySelectorAll('p'));
-  }
-  loadSource(sourceBody);
-
-  /* ===================================================================
-     DOM 構築
-     =================================================================== */
   const root = document.createElement('div');
-  root.id = 'vreader-root';
-  root.dataset.theme = cfg.theme;
+  root.id = '__mv_viewer';
   root.innerHTML = `
-    <div id="vreader-pages"></div>
-    <div id="vreader-testpage"></div>
-    <div id="vreader-end">
-      <div class="vr-end-title"></div>
-      <div class="vr-end-ads"></div>
-      <nav class="vr-end-nav"></nav>
-      <div class="vr-end-tip"></div>
-    </div>
-    <div id="vreader-bar">
-      <button data-act="next-ep">← 次話</button>
-      <button data-act="prev-ep">前話 →</button>
-      <button data-act="font-dec">a−</button>
-      <button data-act="font-inc">A＋</button>
-      <button data-act="theme">配色</button>
-      <button data-act="exit">×</button>
-    </div>
-    <div id="vreader-info"></div>
-    <div id="vreader-loading">読み込み中…</div>
+    <style>
+      #__mv_viewer {
+        position: fixed; inset: 0; z-index: 2147483647;
+        background: #000; overflow: hidden;
+        user-select: none; -webkit-user-select: none;
+        touch-action: manipulation;
+      }
+      #__mv_stage {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: row-reverse;
+        align-items: center; justify-content: center;
+        gap: 2px;
+      }
+      #__mv_stage img {
+        height: 100vh; width: auto;
+        max-width: 50vw;
+        object-fit: contain;
+        display: block;
+      }
+      #__mv_stage.single img { max-width: 100vw; }
+      #__mv_tap_next, #__mv_tap_prev {
+        position: absolute; left: 0; right: 0;
+        z-index: 2;
+      }
+      #__mv_tap_next { top: 0; height: 70%; }
+      #__mv_tap_prev { bottom: 0; height: 30%; }
+      .__mv_btn {
+        position: absolute; z-index: 3;
+        background: rgba(0,0,0,0.6); color: #fff;
+        border: 1px solid rgba(255,255,255,0.3);
+        border-radius: 6px; padding: 8px 12px;
+        font: 14px/1 sans-serif; cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+      }
+      .__mv_btn:disabled { opacity: 0.5; }
+      #__mv_close { top: 10px; right: 10px; }
+      #__mv_shift { top: 10px; left: 10px; }
+      #__mv_version {
+        position: absolute; bottom: 6px; right: 8px; z-index: 3;
+        color: rgba(255,255,255,0.4); font: 10px/1 sans-serif;
+        pointer-events: none;
+      }
+      #__mv_next_chapter {
+        top: 50%; left: 50%; transform: translate(-50%, -50%);
+        padding: 16px 24px; font-size: 16px;
+        display: none;
+      }
+      #__mv_next_chapter.show { display: block; }
+      #__mv_end_msg {
+        position: absolute; top: 40%; left: 50%;
+        transform: translate(-50%, -50%);
+        color: #fff; font: 14px sans-serif;
+        display: none;
+      }
+      #__mv_end_msg.show { display: block; }
+      #__mv_toast {
+        position: absolute; top: 50%; left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0,0,0,0.75); color: #fff;
+        padding: 12px 20px; border-radius: 8px;
+        font: 14px sans-serif; z-index: 4;
+        opacity: 0; transition: opacity 0.3s;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      #__mv_toast.show { opacity: 1; }
+      #__mv_loader_iframe {
+        position: fixed; left: -9999px; top: 0;
+        width: 800px; height: 600px;
+        border: 0; visibility: hidden;
+      }
+    </style>
+    <div id="__mv_stage"></div>
+    <div id="__mv_tap_next"></div>
+    <div id="__mv_tap_prev"></div>
+    <button class="__mv_btn" id="__mv_close" title="v${VERSION}">✕ 閉じる</button>
+    <button class="__mv_btn" id="__mv_shift">⇄ 1枚ずらす</button>
+    <div id="__mv_end_msg">最終ページです</div>
+    <button class="__mv_btn" id="__mv_next_chapter">次の章へ →</button>
+    <div id="__mv_toast"></div>
+    <div id="__mv_version">v${VERSION}</div>
   `;
-
-  /* ===================================================================
-     スタイル注入
-     =================================================================== */
-  const style = document.createElement('style');
-  style.id = 'vreader-style';
-  style.textContent = `
-    #vreader-root {
-      position: fixed !important; inset: 0 !important;
-      z-index: 2147483647 !important; overflow: hidden !important;
-      font-family: "Hiragino Mincho ProN", "YuMincho", "Yu Mincho", serif;
-      transition: background .2s, color .2s;
-    }
-    #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
-    #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
-
-    #vreader-pages {
-      position: absolute;
-      top: 4vh; bottom: 6vh;
-    }
-
-    .vr-page, #vreader-testpage {
-      writing-mode: vertical-rl;
-      direction: ltr;
-      letter-spacing: 0.1em;
-      -webkit-text-size-adjust: none;
-      text-size-adjust: none;
-      overflow: hidden;
-    }
-    .vr-page p, #vreader-testpage p { margin: 0; text-indent: 1em; }
-    .vr-page br, #vreader-testpage br { display: block; content: ""; }
-    .vr-page ruby, #vreader-testpage ruby { display: inline; }
-    .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
-
-    .vr-page {
-      position: absolute;
-      top: 0; bottom: 0;
-      left: 0; right: 0;
-      display: none;
-    }
-    .vr-page.active { display: block; }
-
-    #vreader-testpage {
-      position: fixed;
-      top: -100000px;
-      left: 0;
-      visibility: hidden;
-      pointer-events: none;
-    }
-
-    #vreader-end {
-      position: absolute;
-      top: 4vh; bottom: 6vh;
-      writing-mode: horizontal-tb;
-      box-sizing: border-box;
-      display: none;
-      flex-direction: column;
-      font-family: sans-serif;
-      padding: 2vh 4vw;
-    }
-    #vreader-end.show { display: flex; }
-    .vr-end-title { text-align: center; font-size: 1.1em; margin-bottom: 4vh; opacity: .85; }
-    .vr-end-ads {
-      flex: 1; display: flex; align-items: center; justify-content: center;
-      min-height: 0; overflow: hidden; margin-bottom: 4vh;
-    }
-    .vr-end-ads > * { max-width: 100% !important; max-height: 100% !important; }
-    .vr-end-nav { display: flex; gap: 3vw; margin-bottom: 2vh; }
-    .vr-end-nav a, .vr-end-nav span {
-      flex: 1; padding: 1em 0; text-align: center;
-      border: 1px solid currentColor; border-radius: 6px;
-      text-decoration: none; color: inherit; font-size: .95em;
-    }
-    .vr-end-nav .vr-disabled { opacity: .3; }
-    .vr-end-nav .vr-next { font-weight: bold; }
-    .vr-end-tip { text-align: center; font-size: .8em; opacity: .5; }
-
-    #vreader-bar {
-      position: fixed; top: 0; left: 0; right: 0;
-      background: rgba(0,0,0,.78); color: #fff;
-      padding: 10px; text-align: center;
-      z-index: 10;
-      transform: translateY(-100%); transition: transform .2s;
-      font-family: sans-serif;
-    }
-    #vreader-bar.show { transform: translateY(0); }
-    #vreader-bar button {
-      background: transparent; border: 1px solid #fff; color: #fff;
-      padding: 8px 14px; margin: 0 4px;
-      border-radius: 4px; font-size: 14px;
-    }
-    #vreader-info {
-      position: fixed; bottom: 6px; left: 50%;
-      transform: translateX(-50%);
-      font-size: 11px; opacity: .45; pointer-events: none;
-      font-family: sans-serif;
-      writing-mode: horizontal-tb;
-      z-index: 6;
-    }
-    #vreader-loading {
-      position: fixed; top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      background: rgba(0,0,0,.75); color: #fff;
-      padding: 12px 24px; border-radius: 6px;
-      font-family: sans-serif; font-size: 14px;
-      z-index: 20;
-      display: none;
-    }
-    #vreader-loading.show { display: block; }
-  `;
-
-  document.documentElement.style.overflow = 'hidden';
-  document.body.style.overflow = 'hidden';
-  document.head.appendChild(style);
   document.body.appendChild(root);
+  const prevOverflow = document.documentElement.style.overflow;
+  document.documentElement.style.overflow = 'hidden';
 
-  /* ===================================================================
-     要素参照
-     =================================================================== */
-  const pagesWrap = root.querySelector('#vreader-pages');
-  const testPage  = root.querySelector('#vreader-testpage');
-  const endPage   = root.querySelector('#vreader-end');
-  const bar       = root.querySelector('#vreader-bar');
-  const info      = root.querySelector('#vreader-info');
-  const loading   = root.querySelector('#vreader-loading');
+  const stage = root.querySelector('#__mv_stage');
+  const endMsg = root.querySelector('#__mv_end_msg');
+  const nextChapterBtn = root.querySelector('#__mv_next_chapter');
+  const toast = root.querySelector('#__mv_toast');
 
-  /* ===================================================================
-     フォント適用
-     =================================================================== */
-  function applyFontStyles() {
-    updateEffectiveFont();  // 画面幅に合わせて再計算
-    const fs = effectiveFont + 'px';
-    const lh = (effectiveFont + 14) + 'px';
+  const showToast = (msg, ms = 1500) => {
+    toast.textContent = msg;
+    toast.classList.add('show');
+    clearTimeout(toast._hideTimer);
+    toast._hideTimer = setTimeout(() => toast.classList.remove('show'), ms);
+  };
 
-    pagesWrap.style.setProperty('font-size', fs, 'important');
-    pagesWrap.style.setProperty('line-height', lh, 'important');
-    testPage.style.setProperty('font-size', fs, 'important');
-    testPage.style.setProperty('line-height', lh, 'important');
+  const isDouble = () => window.innerWidth >= BREAKPOINT;
 
-    for (const p of sourceParagraphs) {
-      p.style.setProperty('font-size', fs, 'important');
-      p.style.setProperty('line-height', lh, 'important');
-      p.querySelectorAll('*').forEach(el => {
-        if (el.tagName === 'RT' || el.tagName === 'RP') {
-          el.style.setProperty('font-size', (effectiveFont * 0.5) + 'px', 'important');
-          el.style.setProperty('line-height', '1', 'important');
-        } else {
-          el.style.setProperty('font-size', fs, 'important');
-          el.style.setProperty('line-height', lh, 'important');
-        }
-      });
+  const render = () => {
+    const step = isDouble() ? 2 : 1;
+    const i = state.index;
+    stage.innerHTML = '';
+    stage.classList.toggle('single', step === 1);
+
+    if (i >= urls.length) {
+      endMsg.classList.add('show');
+      nextChapterBtn.classList.toggle('show', !!nextChapterUrl);
+      return;
     }
-  }
+    endMsg.classList.remove('show');
+    nextChapterBtn.classList.remove('show');
 
-  /* ===================================================================
-     列幅の実測
-     =================================================================== */
-  function measureColumnWidth() {
-    const t = document.createElement('div');
-    t.style.cssText = `
-      position: fixed;
-      top: -100000px; left: 0;
-      visibility: hidden;
-      writing-mode: vertical-rl;
-      font-size: ${effectiveFont}px;
-      line-height: ${effectiveFont + 14}px;
-      letter-spacing: 0.1em;
-    `;
-    t.textContent = '測';
-    document.body.appendChild(t);
-    const w = t.getBoundingClientRect().width;
-    document.body.removeChild(t);
-    return w || (effectiveFont + 14);
-  }
+    const first = document.createElement('img');
+    first.src = urls[i];
+    stage.appendChild(first);
 
-  /* ===================================================================
-     ページ寸法の計測
-     =================================================================== */
-  function measure() {
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const availableWidth = viewportWidth * 0.8;
-    const availableHeight = viewportHeight * 0.9;
-
-    columnWidth = measureColumnWidth();
-
-    const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
-    pageWidth = columnsPerPage * columnWidth;
-    pageHeight = Math.floor(availableHeight);
-
-    const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
-    pagesWrap.style.left = sideMargin + 'px';
-    pagesWrap.style.width = pageWidth + 'px';
-
-    endPage.style.left = sideMargin + 'px';
-    endPage.style.right = 'auto';
-    endPage.style.width = pageWidth + 'px';
-
-    testPage.style.width = pageWidth + 'px';
-    testPage.style.height = pageHeight + 'px';
-  }
-
-  /* ===================================================================
-     段落割り付け
-     =================================================================== */
-  function fitsInTestPage() {
-    return testPage.scrollWidth <= pageWidth;
-  }
-
-  function splitOversizedParagraph(p) {
-    const text = p.textContent;
-    const pieces = [];
-    let remaining = text;
-
-    while (remaining.length > 0) {
-      let lo = 1, hi = remaining.length;
-      let best = 1;
-      while (lo <= hi) {
-        const mid = Math.floor((lo + hi) / 2);
-        const newP = document.createElement('p');
-        newP.textContent = remaining.substring(0, mid);
-        newP.style.setProperty('font-size', effectiveFont + 'px', 'important');
-        newP.style.setProperty('line-height', (effectiveFont + 14) + 'px', 'important');
-        testPage.innerHTML = '';
-        testPage.appendChild(newP);
-        if (fitsInTestPage()) {
-          best = mid;
-          lo = mid + 1;
-        } else {
-          hi = mid - 1;
-        }
-      }
-
-      let splitAt = best;
-      const pieceText = remaining.substring(0, best);
-      const lastPeriod = pieceText.lastIndexOf('。');
-      if (lastPeriod > 0 && lastPeriod + 1 <= best) {
-        splitAt = lastPeriod + 1;
-      }
-
-      const newP = document.createElement('p');
-      newP.textContent = remaining.substring(0, splitAt);
-      newP.style.setProperty('font-size', effectiveFont + 'px', 'important');
-      newP.style.setProperty('line-height', (effectiveFont + 14) + 'px', 'important');
-      pieces.push(newP);
-      remaining = remaining.substring(splitAt);
+    if (step === 2 && i + 1 < urls.length) {
+      const second = document.createElement('img');
+      second.src = urls[i + 1];
+      stage.appendChild(second);
     }
+    preload(i + step);
+  };
 
-    testPage.innerHTML = '';
-    return pieces;
-  }
-
-  function paginate() {
-    pages = [[]];
-    testPage.innerHTML = '';
-
-    function currentPageArr() {
-      return pages[pages.length - 1];
-    }
-
-    function newPage() {
-      pages.push([]);
-      testPage.innerHTML = '';
-    }
-
-    function tryAdd(p) {
-      const clone = p.cloneNode(true);
-      testPage.appendChild(clone);
-      if (fitsInTestPage()) {
-        currentPageArr().push(p);
-        return true;
-      } else {
-        testPage.removeChild(clone);
-        return false;
+  const preload = (from) => {
+    for (let k = 0; k < 4; k++) {
+      const idx = from + k;
+      if (idx < urls.length) {
+        const img = new Image();
+        img.src = urls[idx];
       }
     }
+  };
 
-    for (const p of sourceParagraphs) {
-      if (tryAdd(p)) continue;
+  const goNext = () => {
+    const step = isDouble() ? 2 : 1;
+    if (state.index >= urls.length) return;
+    state.index = Math.min(state.index + step, urls.length);
+    render();
+  };
 
-      if (currentPageArr().length > 0) {
-        newPage();
-      }
+  const goPrev = () => {
+    const step = isDouble() ? 2 : 1;
+    state.index = Math.max(state.index - step, 0);
+    render();
+  };
 
-      if (tryAdd(p)) continue;
-
-      const pieces = splitOversizedParagraph(p);
-
-      for (const piece of pieces) {
-        if (tryAdd(piece)) continue;
-
-        if (currentPageArr().length > 0) {
-          newPage();
-        }
-
-        if (tryAdd(piece)) continue;
-
-        currentPageArr().push(piece);
-        testPage.appendChild(piece.cloneNode(true));
-      }
+  const shiftOne = () => {
+    if (state.index + 1 < urls.length) {
+      state.index += 1;
+      render();
     }
+  };
 
-    testPage.innerHTML = '';
-    bodyPages = Math.max(1, pages.length);
-  }
-
-  /* ===================================================================
-     ページDOMの構築
-     =================================================================== */
-  function renderPages() {
-    pagesWrap.innerHTML = '';
-    pageDivs = [];
-
-    for (let i = 0; i < pages.length; i++) {
-      const pageDiv = document.createElement('div');
-      pageDiv.className = 'vr-page';
-      pageDiv.dataset.idx = i;
-      for (const p of pages[i]) {
-        pageDiv.appendChild(p.cloneNode(true));
-      }
-      pagesWrap.appendChild(pageDiv);
-      pageDivs.push(pageDiv);
-    }
-  }
-
-  /* ===================================================================
-     一括処理
-     =================================================================== */
-  function rebuildPages() {
-    updateEffectiveFont();  // 画面サイズに合わせてフォント更新
-    measure();
-    paginate();
-    renderPages();
-    totalPages = bodyPages + 1;
-  }
-
-  function deferredRebuild(afterFn) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        rebuildPages();
-        if (afterFn) afterFn();
-      });
-    });
-  }
-
-  /* ===================================================================
-     ページ移動
-     =================================================================== */
-  function goTo(n) {
-    n = Math.max(0, Math.min(totalPages - 1, n));
-    curPage = n;
-
-    if (n < bodyPages) {
-      endPage.classList.remove('show');
-      for (let i = 0; i < pageDivs.length; i++) {
-        pageDivs[i].classList.toggle('active', i === n);
-      }
-    } else {
-      for (const pd of pageDivs) pd.classList.remove('active');
-      endPage.classList.add('show');
-    }
-    updateInfo();
-  }
-
-  const goToInstant = goTo;
-
-  const isOnEndPage = () => curPage === totalPages - 1;
-
-  function updateInfo() {
-    info.textContent = `${curPage + 1} / ${totalPages}`;
-  }
-
-  /* ===================================================================
-     章末ページの更新
-     =================================================================== */
-  function updateEndPage() {
-    const { title, nextHref, prevHref, adNodes } = currentMeta;
-
-    root.querySelector('.vr-end-title').textContent =
-      title ? '― ' + title + ' 終わり ―' : '― このエピソードはここまで ―';
-
-    const nav = root.querySelector('.vr-end-nav');
-    nav.innerHTML = `
-      ${ nextHref ? `<a href="${escapeHtml(nextHref)}" class="vr-next" data-nav="next">次話 →</a>`
-                  : '<span class="vr-disabled">完結／未投稿</span>' }
-      <a href="#" data-nav="index">目次</a>
-      ${ prevHref ? `<a href="${escapeHtml(prevHref)}" data-nav="prev">← 前話</a>`
-                  : '<span class="vr-disabled">← 前話</span>' }
-    `;
-
-    root.querySelector('.vr-end-tip').textContent =
-      nextHref ? '左端タップでも次話へ進めます' : '';
-
-    const adsContainer = root.querySelector('.vr-end-ads');
-    adsContainer.innerHTML = '';
-    if (adNodes && adNodes.length > 0) {
-      adNodes.forEach(ad => adsContainer.appendChild(ad));
-    } else {
-      adsContainer.innerHTML = '<div style="opacity:.4;font-size:.85em">（広告なし）</div>';
-    }
-
-    let prefetch = document.head.querySelector('link[data-vreader-prefetch]');
-    if (nextHref) {
-      if (!prefetch) {
-        prefetch = document.createElement('link');
-        prefetch.rel = 'prefetch';
-        prefetch.dataset.vreaderPrefetch = '1';
-        document.head.appendChild(prefetch);
-      }
-      prefetch.href = nextHref;
-    } else if (prefetch) {
-      prefetch.remove();
-    }
-  }
-
-  updateEndPage();
-
-  /* ===================================================================
-     エピソード遷移
-     =================================================================== */
-  let loadingEpisode = false;
-  async function loadEpisode(url) {
-    if (loadingEpisode) return;
-    loadingEpisode = true;
-    loading.classList.add('show');
-
+  const fallbackNavigate = (targetUrl) => {
     try {
-      const res = await fetch(url, { credentials: 'same-origin' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const html = await res.text();
-      const doc  = new DOMParser().parseFromString(html, 'text/html');
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({
+        version: VERSION,
+        ts: Date.now(),
+      }));
+    } catch {}
+    location.href = targetUrl;
+  };
 
-      const newBody = doc.querySelector(sel.body);
-      if (!newBody) throw new Error('body not found');
+  let loadingNext = false;
 
-      loadSource(newBody);
-      applyFontStyles();
+  const loadNextChapterViaIframe = () => {
+    if (!nextChapterUrl || loadingNext) return;
+    loadingNext = true;
+    const targetUrl = nextChapterUrl;
+    const originalLabel = nextChapterBtn.textContent;
+    nextChapterBtn.disabled = true;
+    nextChapterBtn.textContent = '読み込み中…';
+    showToast('次の章を読み込み中…', 60000);
 
-      currentMeta = extractMeta(doc, url);
-      updateEndPage();
+    const iframe = document.createElement('iframe');
+    iframe.id = '__mv_loader_iframe';
 
-      history.pushState({ vreader: true }, '', url);
-      if (currentMeta.title) document.title = currentMeta.title;
+    let settled = false;
+    let globalTimeoutId = null;
+    let pollTimeoutId = null;
 
-      deferredRebuild(() => {
-        goTo(0);
-        loading.classList.remove('show');
-        loadingEpisode = false;
-      });
+    const cleanup = () => {
+      if (globalTimeoutId) clearTimeout(globalTimeoutId);
+      if (pollTimeoutId) clearTimeout(pollTimeoutId);
+      try { iframe.remove(); } catch {}
+    };
 
-    } catch (err) {
-      console.error('[vreader] loadEpisode error:', err);
-      loading.classList.remove('show');
-      loadingEpisode = false;
-      location.href = url;
-    }
-  }
+    const onSuccess = (newUrls, nextNextUrl) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
 
-  /* ===================================================================
-     タップ処理
-     =================================================================== */
-  function onTap(e) {
-    const navLink = e.target.closest('[data-nav]');
-    if (navLink) {
-      e.preventDefault();
-      const type = navLink.dataset.nav;
-      if (type === 'next' && currentMeta.nextHref) {
-        loadEpisode(currentMeta.nextHref);
-      } else if (type === 'prev' && currentMeta.prevHref) {
-        loadEpisode(currentMeta.prevHref);
-      } else if (type === 'index') {
-        history.back();
-      }
-      return;
-    }
+      const startIndex = urls.length;
+      urls.push(...newUrls);
+      nextChapterUrl = nextNextUrl;
 
-    if (e.target.closest('a, button')) return;
+      try {
+        history.pushState({ mv: true }, '', targetUrl);
+      } catch {}
 
-    const x = e.clientX, y = e.clientY;
-    const w = window.innerWidth, h = window.innerHeight;
+      nextChapterBtn.textContent = originalLabel;
+      nextChapterBtn.disabled = false;
+      loadingNext = false;
 
-    if (y < h * 0.12) { bar.classList.toggle('show'); return; }
+      state.index = startIndex;
+      render();
+      showToast(`次の章を読み込みました(${newUrls.length}ページ)`, 1500);
+    };
 
-    if (isOnEndPage() && currentMeta.nextHref && x < w / 3) {
-      loadEpisode(currentMeta.nextHref);
-      return;
-    }
+    const onFailure = (reason) => {
+      if (settled) return;
+      settled = true;
+      console.warn('[mv] iframe load failed:', reason);
+      cleanup();
+      nextChapterBtn.textContent = originalLabel;
+      nextChapterBtn.disabled = false;
+      loadingNext = false;
+      showToast('通常遷移に切り替えます…', 1500);
+      setTimeout(() => fallbackNavigate(targetUrl), 400);
+    };
 
-    if (x < w / 3)          goTo(curPage + 1);
-    else if (x > w * 2 / 3) goTo(curPage - 1);
-  }
-  root.addEventListener('click', onTap);
+    globalTimeoutId = setTimeout(() => onFailure('global timeout'), IFRAME_MAX_WAIT_MS + 3000);
 
-  /* ===================================================================
-     設定バー
-     =================================================================== */
-  bar.addEventListener('click', e => {
-    const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    const act = btn.dataset.act;
-    e.stopPropagation();
+    iframe.onerror = () => onFailure('iframe error event');
 
-    if (act === 'prev-ep') {
-      if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
-      bar.classList.remove('show');
-      return;
-    }
-    else if (act === 'next-ep') {
-      if (currentMeta.nextHref) loadEpisode(currentMeta.nextHref);
-      bar.classList.remove('show');
-      return;
-    }
-    else if (act === 'font-dec') {
-      // 文字を小さく = 列数を増やす
-      cfg.columnsPerPage = Math.min(40, cfg.columnsPerPage + 1);
-    }
-    else if (act === 'font-inc') {
-      // 文字を大きく = 列数を減らす
-      cfg.columnsPerPage = Math.max(5, cfg.columnsPerPage - 1);
-    }
-    else if (act === 'theme') {
-      cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
-    }
-    else if (act === 'exit') {
-      location.reload();
-      return;
-    }
+    iframe.onload = () => {
+      let lastCount = -1;
+      let stableChecks = 0;
+      const pollStart = Date.now();
 
-    root.dataset.theme = cfg.theme;
-    saveCfg();
+      const poll = () => {
+        if (settled) return;
 
-    if (act === 'font-dec' || act === 'font-inc') {
-      const prevRatio = totalPages > 0 ? curPage / totalPages : 0;
-      applyFontStyles();
-      deferredRebuild(() => {
-        goTo(Math.round(prevRatio * totalPages));
-      });
-    }
-  });
+        if (Date.now() - pollStart > IFRAME_MAX_WAIT_MS) {
+          onFailure('poll timeout');
+          return;
+        }
 
-  /* ===================================================================
-     ブラウザ戻る/進む
-     =================================================================== */
-  window.addEventListener('popstate', (e) => {
-    if (e.state && e.state.vreader) {
-      loadEpisode(location.href);
-    } else {
-      location.reload();
-    }
-  });
+        let doc = null;
+        try {
+          doc = iframe.contentDocument;
+        } catch (e) {
+          onFailure('cross-origin');
+          return;
+        }
+        if (!doc) {
+          pollTimeoutId = setTimeout(poll, IFRAME_POLL_INTERVAL_MS);
+          return;
+        }
 
-  /* ===================================================================
-     起動 & リサイズ
-     =================================================================== */
-  applyFontStyles();
-  deferredRebuild(() => goTo(0));
+        const newUrls = extractImageUrls(doc);
+
+        if (newUrls.length > 0 && newUrls.length === lastCount) {
+          stableChecks++;
+          if (stableChecks >= IFRAME_STABLE_CHECKS_REQUIRED) {
+            const nextNext = findNextChapterUrl(doc, targetUrl);
+            onSuccess(newUrls, nextNext);
+            return;
+          }
+        } else {
+          stableChecks = 0;
+          lastCount = newUrls.length;
+        }
+
+        pollTimeoutId = setTimeout(poll, IFRAME_POLL_INTERVAL_MS);
+      };
+
+      poll();
+    };
+
+    iframe.src = targetUrl;
+    document.body.appendChild(iframe);
+  };
+
+  const close = () => {
+    root.remove();
+    document.documentElement.style.overflow = prevOverflow;
+    window.removeEventListener('resize', onResize);
+  };
+
+  root.querySelector('#__mv_tap_next').addEventListener('click', goNext);
+  root.querySelector('#__mv_tap_prev').addEventListener('click', goPrev);
+  root.querySelector('#__mv_close').addEventListener('click', close);
+  root.querySelector('#__mv_shift').addEventListener('click', shiftOne);
+  nextChapterBtn.addEventListener('click', loadNextChapterViaIframe);
 
   let resizeTimer;
-  window.addEventListener('resize', () => {
+  const onResize = () => {
     clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      const ratio = totalPages > 0 ? curPage / totalPages : 0;
-      applyFontStyles();  // 画面サイズ変更時にフォントも更新
-      deferredRebuild(() => goTo(Math.round(ratio * totalPages)));
-    }, 200);
-  });
+    resizeTimer = setTimeout(render, 150);
+  };
+  window.addEventListener('resize', onResize);
+
+  render();
+  if (resumedFromPrev) showToast('前の章から続行');
 })();
