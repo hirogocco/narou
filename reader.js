@@ -396,13 +396,16 @@
       if (currentMeta.title) document.title = currentMeta.title;
 
       bodyWrap.scrollTop = 0;
-      setTimeout(() => {
-        measure();
-        curPage = 0;
-        goTo(0);
-        loading.classList.remove('show');
-        loadingEpisode = false;
-      }, 50);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          void bodyWrap.offsetHeight;
+          measure();
+          curPage = 0;
+          goTo(0);
+          loading.classList.remove('show');
+          loadingEpisode = false;
+        });
+      });
 
     } catch (err) {
       console.error('[vreader] loadEpisode error:', err);
@@ -464,7 +467,13 @@
     applyFontStyles();
     root.dataset.theme = cfg.theme;
     saveCfg();
-    setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void bodyWrap.offsetHeight;  // 強制リフロー
+        measure();
+        goTo(Math.min(curPage, totalPages - 1));
+      });
+    });
   });
 
   /* ===================================================================
@@ -482,7 +491,13 @@
      起動 & リサイズ
      =================================================================== */
   applyFontStyles();
-  setTimeout(() => { measure(); goTo(0); }, 150);
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      void bodyWrap.offsetHeight;
+      measure();
+      goTo(0);
+    });
+  });
 
   let resizeTimer;
   window.addEventListener('resize', () => {
