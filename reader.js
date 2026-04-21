@@ -380,15 +380,22 @@
     const sw = scroller.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(sw / pageWidth));
     totalPages = bodyPages + 1;
+
+   // デバッグ：最初の段落の実際の幅を測る
+    const firstP = bodyContainer.querySelector('p');
+    const firstPWidth = firstP ? firstP.offsetWidth : 0;
+    console.log('[vreader] columnWidth(line-height):', columnWidth, 'firstP.offsetWidth:', firstPWidth);
+    window._vrDebug = { columnWidth, firstPWidth, pageWidth, stepWidth };
+
+     
     updateInfo();
   }
 
-  function updateInfo() {
-    const sh = bodyContainer.offsetHeight;
-    const cw = scroller.clientWidth;
-    const sl = scroller.scrollLeft;
-    info.textContent = `${curPage + 1}/${totalPages} pw:${pageWidth} cw:${cw} sl:${sl} h:${sh}`;
+    function updateInfo() {
+    const d = window._vrDebug || {};
+    info.textContent = `${curPage + 1}/${totalPages} lh:${d.columnWidth?.toFixed?.(1)} p:${d.firstPWidth} pw:${pageWidth}`;
   }
+
 
 
   /* ===================================================================
