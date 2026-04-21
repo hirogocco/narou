@@ -1,7 +1,8 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v13 — 段落単位ページ割り付け方式
-         各ページが独立したDOMコンテナ。サブピクセル誤差問題を根絶。
+   v14 — 列数ベースサイジング方式
+         画面サイズが変わっても、1ページあたりの列数（＝情報密度）を維持。
+         画面が広くなれば文字も比例して大きくなる。
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -22,13 +23,12 @@
 
   const SEL = {
     narou: {
-       body:  '.p-novel__body, #novel_honbun',
-       title: '.p-novel__title, .novel_subtitle',
-       next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
-       prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
-       ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'  
-　　　},
-
+      body:  '.p-novel__body, #novel_honbun',
+      title: '.p-novel__title, .novel_subtitle',
+      next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
+      prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
+      ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'
+    },
     kakuyomu: {
       body:  '.widget-episodeBody',
       title: '.widget-episodeTitle',
@@ -52,16 +52,48 @@
 
   /* ===================================================================
      設定（localStorage）
+       v3: cfg.columnsPerPage（1ページあたりの列数）を保存
+       v2: cfg.font（フォントピクセル値）から自動移行
      =================================================================== */
-  const SK = 'vreader-settings-v2';
-  let cfg = { font: 18, theme: 'light' };
+  const SK = 'vreader-settings-v3';
+  const REFERENCE_WIDTH = 412;  // 典型的なスマホ幅（移行計算の基準）
+  let cfg = { columnsPerPage: 10, theme: 'light' };
   try {
     const s = localStorage.getItem(SK);
-    if (s) Object.assign(cfg, JSON.parse(s));
+    if (s) {
+      Object.assign(cfg, JSON.parse(s));
+    } else {
+      // v2 からの移行
+      const oldStr = localStorage.getItem('vreader-settings-v2');
+      if (oldStr) {
+        const old = JSON.parse(oldStr);
+        if (typeof old.font === 'number') {
+          const refAvail = REFERENCE_WIDTH * 0.8;
+          const refColW = old.font + 14;
+          cfg.columnsPerPage = Math.max(5, Math.min(40, Math.round(refAvail / refColW)));
+        }
+        if (old.theme) cfg.theme = old.theme;
+      }
+    }
   } catch (e) {}
   const saveCfg = () => {
     try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) {}
   };
+
+  /* ===================================================================
+     画面幅から実効フォントサイズを決定
+     =================================================================== */
+  let effectiveFont = 18;  // updateEffectiveFont() で更新される
+
+  function updateEffectiveFont() {
+    const viewportWidth = window.innerWidth;
+    const availableWidth = viewportWidth * 0.8;
+    // columnWidth = font + 14 の逆算
+    let f = (availableWidth / cfg.columnsPerPage) - 14;
+    // 極端な値をクランプ
+    f = Math.max(8, Math.min(60, f));
+    effectiveFont = Math.round(f);
+  }
 
   /* ===================================================================
      ユーティリティ
@@ -177,9 +209,9 @@
   /* ===================================================================
      状態変数
      =================================================================== */
-  let sourceParagraphs = [];  // 元の<p>要素の配列（DOMには未接続）
-  let pages = [];              // 各ページの段落配列 [[p1,p2], [p3,p4,p5], ...]
-  let pageDivs = [];           // レンダリング済みの.vr-page DOM要素の配列
+  let sourceParagraphs = [];
+  let pages = [];
+  let pageDivs = [];
   let curPage = 0;
   let totalPages = 0;
   let bodyPages = 0;
@@ -189,7 +221,7 @@
   let currentMeta = extractMeta(document, location.href);
 
   /* ===================================================================
-     ソース読み込み：サニタイズして sourceParagraphs を更新
+     ソース読み込み
      =================================================================== */
   function loadSource(srcElement) {
     const sanitized = sanitizeBody(srcElement);
@@ -215,7 +247,7 @@
     </div>
     <div id="vreader-bar">
       <button data-act="next-ep">← 次話</button>
-      <button data-act="prev-ep">前話 →</button>      
+      <button data-act="prev-ep">前話 →</button>
       <button data-act="font-dec">a−</button>
       <button data-act="font-inc">A＋</button>
       <button data-act="theme">配色</button>
@@ -354,22 +386,21 @@
      フォント適用
      =================================================================== */
   function applyFontStyles() {
-    const fs = cfg.font + 'px';
-    const lh = (cfg.font + 14) + 'px';
+    updateEffectiveFont();  // 画面幅に合わせて再計算
+    const fs = effectiveFont + 'px';
+    const lh = (effectiveFont + 14) + 'px';
 
-    // 親要素に設定（子要素に継承させる）
     pagesWrap.style.setProperty('font-size', fs, 'important');
     pagesWrap.style.setProperty('line-height', lh, 'important');
     testPage.style.setProperty('font-size', fs, 'important');
     testPage.style.setProperty('line-height', lh, 'important');
 
-    // ソース段落にも直接設定（クローン時に引き継がれる）
     for (const p of sourceParagraphs) {
       p.style.setProperty('font-size', fs, 'important');
       p.style.setProperty('line-height', lh, 'important');
       p.querySelectorAll('*').forEach(el => {
         if (el.tagName === 'RT' || el.tagName === 'RP') {
-          el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+          el.style.setProperty('font-size', (effectiveFont * 0.5) + 'px', 'important');
           el.style.setProperty('line-height', '1', 'important');
         } else {
           el.style.setProperty('font-size', fs, 'important');
@@ -389,15 +420,15 @@
       top: -100000px; left: 0;
       visibility: hidden;
       writing-mode: vertical-rl;
-      font-size: ${cfg.font}px;
-      line-height: ${cfg.font + 14}px;
+      font-size: ${effectiveFont}px;
+      line-height: ${effectiveFont + 14}px;
       letter-spacing: 0.1em;
     `;
     t.textContent = '測';
     document.body.appendChild(t);
     const w = t.getBoundingClientRect().width;
     document.body.removeChild(t);
-    return w || (cfg.font + 14);
+    return w || (effectiveFont + 14);
   }
 
   /* ===================================================================
@@ -407,7 +438,7 @@
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
     const availableWidth = viewportWidth * 0.8;
-    const availableHeight = viewportHeight * 0.9;  // top:4vh + bottom:6vh = 10vh
+    const availableHeight = viewportHeight * 0.9;
 
     columnWidth = measureColumnWidth();
 
@@ -428,30 +459,26 @@
   }
 
   /* ===================================================================
-     段落割り付け：sourceParagraphs を pages に分配
+     段落割り付け
      =================================================================== */
   function fitsInTestPage() {
-    // testPage の内容幅が pageWidth 以内に収まるか
     return testPage.scrollWidth <= pageWidth;
   }
 
   function splitOversizedParagraph(p) {
-    // 長すぎる段落を文字単位でバイナリサーチ、可能なら。で区切る
     const text = p.textContent;
     const pieces = [];
     let remaining = text;
 
     while (remaining.length > 0) {
-      // 最大何文字入るか二分探索
       let lo = 1, hi = remaining.length;
       let best = 1;
       while (lo <= hi) {
         const mid = Math.floor((lo + hi) / 2);
         const newP = document.createElement('p');
         newP.textContent = remaining.substring(0, mid);
-        // フォントスタイルを継承させるため、親のスタイルだけでは不安なので明示
-        newP.style.setProperty('font-size', cfg.font + 'px', 'important');
-        newP.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+        newP.style.setProperty('font-size', effectiveFont + 'px', 'important');
+        newP.style.setProperty('line-height', (effectiveFont + 14) + 'px', 'important');
         testPage.innerHTML = '';
         testPage.appendChild(newP);
         if (fitsInTestPage()) {
@@ -462,7 +489,6 @@
         }
       }
 
-      // 可能なら「。」で区切る
       let splitAt = best;
       const pieceText = remaining.substring(0, best);
       const lastPeriod = pieceText.lastIndexOf('。');
@@ -472,8 +498,8 @@
 
       const newP = document.createElement('p');
       newP.textContent = remaining.substring(0, splitAt);
-      newP.style.setProperty('font-size', cfg.font + 'px', 'important');
-      newP.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+      newP.style.setProperty('font-size', effectiveFont + 'px', 'important');
+      newP.style.setProperty('line-height', (effectiveFont + 14) + 'px', 'important');
       pieces.push(newP);
       remaining = remaining.substring(splitAt);
     }
@@ -495,7 +521,6 @@
       testPage.innerHTML = '';
     }
 
-    // 現在ページに段落を追加試行。成功なら true、失敗なら testPage を元に戻して false
     function tryAdd(p) {
       const clone = p.cloneNode(true);
       testPage.appendChild(clone);
@@ -511,15 +536,12 @@
     for (const p of sourceParagraphs) {
       if (tryAdd(p)) continue;
 
-      // 現ページに入らない。現ページが空でなければ新規ページへ
       if (currentPageArr().length > 0) {
         newPage();
       }
 
-      // 空のページで再挑戦
       if (tryAdd(p)) continue;
 
-      // 空のページでも入らない → 分割
       const pieces = splitOversizedParagraph(p);
 
       for (const piece of pieces) {
@@ -531,7 +553,6 @@
 
         if (tryAdd(piece)) continue;
 
-        // バイナリサーチで作った断片なので入るはず。念のため追加。
         currentPageArr().push(piece);
         testPage.appendChild(piece.cloneNode(true));
       }
@@ -561,13 +582,14 @@
   }
 
   /* ===================================================================
-     一括処理：計測 → 割り付け → レンダリング
+     一括処理
      =================================================================== */
   function rebuildPages() {
+    updateEffectiveFont();  // 画面サイズに合わせてフォント更新
     measure();
     paginate();
     renderPages();
-    totalPages = bodyPages + 1;  // +1 は章末ページ
+    totalPages = bodyPages + 1;
   }
 
   function deferredRebuild(afterFn) {
@@ -592,7 +614,6 @@
         pageDivs[i].classList.toggle('active', i === n);
       }
     } else {
-      // 章末ページ
       for (const pd of pageDivs) pd.classList.remove('active');
       endPage.classList.add('show');
     }
@@ -737,35 +758,42 @@
     const act = btn.dataset.act;
     e.stopPropagation();
 
-   if (act === 'prev-ep') {
+    if (act === 'prev-ep') {
       if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
       bar.classList.remove('show');
       return;
     }
-
     else if (act === 'next-ep') {
       if (currentMeta.nextHref) loadEpisode(currentMeta.nextHref);
       bar.classList.remove('show');
       return;
     }
-    else if (act === 'font-dec') cfg.font = Math.max(12, cfg.font - 1);
-    else if (act === 'font-inc') cfg.font = Math.min(40, cfg.font + 1);
-    else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
-    else if (act === 'exit')     { location.reload(); return; }
-
+    else if (act === 'font-dec') {
+      // 文字を小さく = 列数を増やす
+      cfg.columnsPerPage = Math.min(40, cfg.columnsPerPage + 1);
+    }
+    else if (act === 'font-inc') {
+      // 文字を大きく = 列数を減らす
+      cfg.columnsPerPage = Math.max(5, cfg.columnsPerPage - 1);
+    }
+    else if (act === 'theme') {
+      cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
+    }
+    else if (act === 'exit') {
+      location.reload();
+      return;
+    }
 
     root.dataset.theme = cfg.theme;
     saveCfg();
 
     if (act === 'font-dec' || act === 'font-inc') {
-      // フォント変更時は再割り付け
       const prevRatio = totalPages > 0 ? curPage / totalPages : 0;
       applyFontStyles();
       deferredRebuild(() => {
         goTo(Math.round(prevRatio * totalPages));
       });
     }
-    // 配色変更はレイアウト再計算不要
   });
 
   /* ===================================================================
@@ -790,6 +818,7 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = totalPages > 0 ? curPage / totalPages : 0;
+      applyFontStyles();  // 画面サイズ変更時にフォントも更新
       deferredRebuild(() => goTo(Math.round(ratio * totalPages)));
     }, 200);
   });
