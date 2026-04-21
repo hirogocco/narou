@@ -169,7 +169,7 @@
       text-size-adjust: none;
     }
     #vreader-body { height: 100%; }
-    #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
+    #vreader-body p { margin: 0; text-indent: 1em; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
 
@@ -270,6 +270,11 @@
       } else {
         el.style.setProperty('font-size', fs, 'important');
         el.style.setProperty('line-height', lh, 'important');
+      }
+      // P要素の margin を列幅（=line-height）に揃える
+      if (el.tagName === 'P') {
+        el.style.setProperty('margin', '0', 'important');
+        el.style.setProperty('margin-bottom', lh, 'important');
       }
     });
   }
