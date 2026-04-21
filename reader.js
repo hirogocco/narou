@@ -281,12 +281,14 @@
 
   /* -------- ページ計測 -------- */
   function measure() {
-    pageWidth = frame.clientWidth;
+    pageWidth = Math.floor(frame.clientWidth);  // 整数化
     bodyWrap.style.minWidth = '';
     endPage.style.width = pageWidth + 'px';
+    void bodyWrap.offsetHeight;  // レイアウト確定を強制
     const w = bodyWrap.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(w / pageWidth));
-    bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
+    // +2pxの余裕で見切れ防止
+    bodyWrap.style.minWidth = (bodyPages * pageWidth + 2) + 'px';
     totalPages = bodyPages + 1;
     updateInfo();
   }
@@ -298,7 +300,7 @@
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
     curPage = n;
-    track.style.transform = `translateX(${n * pageWidth}px)`;
+    track.style.transform = `translateX(${Math.round(n * pageWidth)}px)`;  // 整数化
     updateInfo();
   }
 
