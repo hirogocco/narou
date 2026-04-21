@@ -169,8 +169,30 @@
       text-size-adjust: none;
     }
     #vreader-body { height: 100%; }
-    #vreader-body p { margin: 0; text-indent: 1em; }
+    #vreader-body p { margin: 0; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
+
+
+    
+    /* 本文内の全ブロック要素の余白を強制消去 */
+    #vreader-body,
+    #vreader-body * {
+      margin: 0 !important;
+      padding: 0 !important;
+      border: 0 !important;
+    }
+    /* ruby の列幅を通常と同じに強制 */
+    #vreader-body ruby {
+      display: inline !important;
+      ruby-position: over;
+    }
+    /* bodyWrap 自身も内側のはみ出しをクリップ */
+    #vreader-body-wrap {
+      overflow: hidden;
+    }
+
+
+    
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
 
     #vreader-end {
@@ -271,11 +293,7 @@
         el.style.setProperty('font-size', fs, 'important');
         el.style.setProperty('line-height', lh, 'important');
       }
-      // P要素の margin を列幅（=line-height）に揃える
-      if (el.tagName === 'P') {
-        el.style.setProperty('margin', '0', 'important');
-        el.style.setProperty('margin-bottom', lh, 'important');
-      }
+      
     });
   }
 
