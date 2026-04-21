@@ -228,6 +228,8 @@
     #vreader-body {
       display: inline-block;
       height: 100%;
+      box-sizing: border-box;
+      vertical-align: top;
       writing-mode: vertical-rl;
       direction: ltr;
       letter-spacing: 0.1em;
@@ -382,8 +384,12 @@
   }
 
   function updateInfo() {
-    info.textContent = `${curPage + 1} / ${totalPages}`;
+    const sh = bodyContainer.offsetHeight;
+    const cw = scroller.clientWidth;
+    const sl = scroller.scrollLeft;
+    info.textContent = `${curPage + 1}/${totalPages} pw:${pageWidth} cw:${cw} sl:${sl} h:${sh}`;
   }
+
 
   /* ===================================================================
      ページ移動：アニメなし、scrollLeftは負の値
