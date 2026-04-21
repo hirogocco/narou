@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v7 — リファクタ + 見切れ根絶 + フォント設定一元化
+   v8 — overflow:hidden削除 + 左右マスクで見切れ視覚対策
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -119,6 +119,8 @@
         </div>
       </div>
     </div>
+    <div id="vreader-mask-l"></div>
+    <div id="vreader-mask-r"></div>
     <div id="vreader-bar">
       <button data-act="font-dec">a−</button>
       <button data-act="font-inc">A＋</button>
@@ -169,11 +171,8 @@
       text-size-adjust: none;
     }
     #vreader-body { height: 100%; }
-    #vreader-body p { margin: 0; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
 
-
-    
     /* 本文内の全ブロック要素の余白を強制消去 */
     #vreader-body,
     #vreader-body * {
@@ -186,13 +185,7 @@
       display: inline !important;
       ruby-position: over;
     }
-    /* bodyWrap 自身も内側のはみ出しをクリップ */
-    #vreader-body-wrap {
-      overflow: hidden;
-    }
 
-
-    
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
 
     #vreader-end {
@@ -220,6 +213,20 @@
     .vr-end-nav .vr-next { font-weight: bold; }
     .vr-end-tip { text-align: center; font-size: .8em; opacity: .5; }
 
+    /* 見切れ隠しマスク（左右の余白を物理的に覆う） */
+    #vreader-mask-l, #vreader-mask-r {
+      position: absolute;
+      top: 0; bottom: 0;
+      z-index: 5;
+      pointer-events: none;
+    }
+    #vreader-mask-l { left: 0; }
+    #vreader-mask-r { right: 0; }
+    #vreader-root[data-theme="light"] #vreader-mask-l,
+    #vreader-root[data-theme="light"] #vreader-mask-r { background: #f5efe2; }
+    #vreader-root[data-theme="dark"] #vreader-mask-l,
+    #vreader-root[data-theme="dark"] #vreader-mask-r { background: #181614; }
+
     #vreader-bar {
       position: fixed; top: 0; left: 0; right: 0;
       background: rgba(0,0,0,.78); color: #fff;
@@ -240,6 +247,7 @@
       font-size: 11px; opacity: .45; pointer-events: none;
       font-family: sans-serif;
       writing-mode: horizontal-tb;
+      z-index: 6;
     }
     #vreader-loading {
       position: fixed; top: 50%; left: 50%;
@@ -268,6 +276,8 @@
   const bar      = root.querySelector('#vreader-bar');
   const info     = root.querySelector('#vreader-info');
   const loading  = root.querySelector('#vreader-loading');
+  const maskL    = root.querySelector('#vreader-mask-l');
+  const maskR    = root.querySelector('#vreader-mask-r');
 
   /* ===================================================================
      状態変数
@@ -278,7 +288,7 @@
   let pageWidth = 0;
 
   /* ===================================================================
-     フォント関連スタイルを一元適用（ここ以外では書かない）
+     フォント関連スタイルを一元適用
      =================================================================== */
   function applyFontStyles() {
     const fs = cfg.font + 'px';
@@ -293,12 +303,11 @@
         el.style.setProperty('font-size', fs, 'important');
         el.style.setProperty('line-height', lh, 'important');
       }
-      
     });
   }
 
   /* ===================================================================
-     1列の幅を実測（見切れ根絶の鍵）
+     1列の幅を実測
      =================================================================== */
   function measureColumnWidth() {
     const N = 20;
@@ -326,20 +335,25 @@
   }
 
   /* ===================================================================
-     ページ計測（pageWidth を列幅の整数倍にする）
+     ページ計測
      =================================================================== */
   function measure() {
     const parentWidth = root.clientWidth;
-    const targetFrameWidth = parentWidth * 0.8;  // 80vw相当
+    const targetFrameWidth = parentWidth * 0.8;
     const columnWidth = measureColumnWidth();
     const columnsPerPage = Math.max(1, Math.floor(targetFrameWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
 
-    // frameをpageWidthに厳密に合わせて中央配置（これが見切れ防止の鍵）
+    // frame を pageWidth ぴったりに、中央配置
     const sideMargin = (parentWidth - pageWidth) / 2;
     frame.style.left = sideMargin + 'px';
     frame.style.right = sideMargin + 'px';
     frame.style.width = pageWidth + 'px';
+
+    // マスクの幅も sideMargin + 少しの buffer で、frameの余白+内側を覆う
+    const maskWidth = sideMargin + 12;
+    maskL.style.width = maskWidth + 'px';
+    maskR.style.width = maskWidth + 'px';
 
     bodyWrap.style.minWidth = '';
     bodyWrap.style.width = pageWidth + 'px';
@@ -347,7 +361,7 @@
 
     void bodyWrap.offsetHeight;
     const w = bodyWrap.scrollWidth;
-    bodyPages = Math.max(1, Math.ceil(w / pageWidth)) +1;
+    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
     const totalWidth = bodyPages * pageWidth;
     bodyWrap.style.width = totalWidth + 'px';
     bodyWrap.style.minWidth = totalWidth + 'px';
@@ -356,9 +370,7 @@
   }
 
   function updateInfo() {
-    const cw = measureColumnWidth();
-    const fw = frame.clientWidth;
-    info.textContent = `${curPage + 1}/${totalPages} [fw:${fw.toFixed(1)} pw:${pageWidth.toFixed(1)} cw:${cw.toFixed(1)}]`;
+    info.textContent = `${curPage + 1} / ${totalPages}`;
   }
 
   function goTo(n) {
@@ -519,7 +531,7 @@
     saveCfg();
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        void bodyWrap.offsetHeight;  // 強制リフロー
+        void bodyWrap.offsetHeight;
         measure();
         goTo(Math.min(curPage, totalPages - 1));
       });
