@@ -344,14 +344,39 @@
   /* ===================================================================
      ページ計測：ブラウザに任せる
      =================================================================== */
-  function measure() {
-    pageWidth = scroller.clientWidth;
+ function measure() {
+    const viewportWidth = window.innerWidth;
+    const availableWidth = viewportWidth * 0.8; // 10vw余白×2
+
+    // 列幅 = line-height（applyFontStylesで設定した値と一致）
+    const columnWidth = cfg.font + 14;
+
+    // 1ページに入る列数（切り捨て）
+    const columnsPerPage = Math.max(1, Math.floor(availableWidth / columnWidth));
+
+    // ページ幅 = 列数 × 列幅（整数倍）
+    pageWidth = columnsPerPage * columnWidth;
+
+    // scroller を pageWidth ぴったりに、中央配置
+    const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
+    scroller.style.left = sideMargin + 'px';
+    scroller.style.right = 'auto';
+    scroller.style.width = pageWidth + 'px';
+
+    // endPage も同じ位置・幅に揃える
+    endPage.style.left = sideMargin + 'px';
+    endPage.style.right = 'auto';
+    endPage.style.width = pageWidth + 'px';
+
+    // リフロー
     void scroller.offsetWidth;
+
     const sw = scroller.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(sw / pageWidth));
     totalPages = bodyPages + 1;
     updateInfo();
   }
+
 
   function updateInfo() {
     info.textContent = `${curPage + 1} / ${totalPages}`;
