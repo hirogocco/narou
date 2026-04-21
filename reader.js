@@ -199,6 +199,8 @@
       <div class="vr-end-tip"></div>
     </div>
     <div id="vreader-bar">
+      <button data-act="prev-ep">← 前話</button>
+      <button data-act="next-ep">次話 →</button>
       <button data-act="font-dec">a−</button>
       <button data-act="font-inc">A＋</button>
       <button data-act="theme">配色</button>
@@ -720,10 +722,21 @@
     const act = btn.dataset.act;
     e.stopPropagation();
 
-    if      (act === 'font-dec') cfg.font = Math.max(12, cfg.font - 1);
+   if      (act === 'prev-ep') {
+      if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
+      bar.classList.remove('show');
+      return;
+    }
+    else if (act === 'next-ep') {
+      if (currentMeta.nextHref) loadEpisode(currentMeta.nextHref);
+      bar.classList.remove('show');
+      return;
+    }
+    else if (act === 'font-dec') cfg.font = Math.max(12, cfg.font - 1);
     else if (act === 'font-inc') cfg.font = Math.min(40, cfg.font + 1);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
+
 
     root.dataset.theme = cfg.theme;
     saveCfg();
