@@ -149,7 +149,6 @@
       writing-mode: vertical-rl;
       box-sizing: border-box;
       font-size: ${cfg.font}px;
-      line-height: 1.9;
       letter-spacing: .05em;
     }
     #vreader-body { height: 100%; }
@@ -398,6 +397,7 @@
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
     bodyWrap.style.fontSize = cfg.font + 'px';
+    bodyWrap.style.lineHeight = (cfg.font + 14) + 'px';
     root.dataset.theme = cfg.theme;
     saveCfg();
     setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
@@ -415,6 +415,7 @@
   });
 
   /* -------- 起動 & リサイズ -------- */
+  bodyWrap.style.lineHeight = (cfg.font + 14) + 'px'; 
   setTimeout(() => { measure(); goTo(0); }, 150);
 
   let resizeTimer;
