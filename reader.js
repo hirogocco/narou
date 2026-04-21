@@ -314,7 +314,9 @@
   }
 
   function updateInfo() {
-    info.textContent = `${curPage + 1} / ${totalPages}`;
+    const cw = measureColumnWidth();
+    const fw = frame.clientWidth;
+    info.textContent = `${curPage + 1}/${totalPages} [fw:${fw.toFixed(1)} pw:${pageWidth.toFixed(1)} cw:${cw.toFixed(1)}]`;
   }
 
   function goTo(n) {
