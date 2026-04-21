@@ -222,6 +222,8 @@
       touch-action: none;
       scrollbar-width: none;
       -ms-overflow-style: none;
+      scroll-snap-type: none;
+      overscroll-behavior: contain;
     }
     #vreader-scroller::-webkit-scrollbar { display: none; }
 
@@ -393,7 +395,7 @@
 
     function updateInfo() {
     const d = window._vrDebug || {};
-    info.textContent = `${curPage + 1}/${totalPages} lh:${d.columnWidth?.toFixed?.(1)} p:${d.firstPWidth} pw:${pageWidth}`;
+    info.textContent = `${curPage + 1}/${totalPages} step:${stepWidth} target:${d.target} actual:${d.actual}`;
   }
 
 
@@ -407,7 +409,12 @@
     if (n < bodyPages) {
       endPage.classList.remove('show');
       scroller.style.display = 'block';
-      scroller.scrollLeft = -(n * stepWidth);
+      const target = -(n * stepWidth);
+      scroller.scrollLeft = target;
+      // 実際のscrollLeftを記録
+      window._vrDebug = window._vrDebug || {};
+      window._vrDebug.target = target;
+      window._vrDebug.actual = scroller.scrollLeft;
     } else {
       endPage.classList.add('show');
     }
