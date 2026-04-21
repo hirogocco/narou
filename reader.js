@@ -1,11 +1,14 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v6 — column風overflow方式 + 次話シームレス遷移
+   v7 — リファクタ + 見切れ根絶 + フォント設定一元化
    ---------------------------------------------------------------------- */
 
 (function () {
   'use strict';
 
+  /* ===================================================================
+     サイト判定 & セレクタ定義
+     =================================================================== */
   const host = location.hostname;
   let SITE = null;
   if (host.indexOf('syosetu.com') >= 0) SITE = 'narou';
@@ -34,6 +37,9 @@
   };
   const sel = SEL[SITE];
 
+  /* ===================================================================
+     既存起動チェック & ソース本文取得
+     =================================================================== */
   if (document.getElementById('vreader-root')) { location.reload(); return; }
 
   const sourceBody = document.querySelector(sel.body);
@@ -42,7 +48,22 @@
     return;
   }
 
-  /* -------- メタデータ抽出 -------- */
+  /* ===================================================================
+     設定（localStorage）
+     =================================================================== */
+  const SK = 'vreader-settings-v2';
+  let cfg = { font: 18, theme: 'light' };
+  try {
+    const s = localStorage.getItem(SK);
+    if (s) Object.assign(cfg, JSON.parse(s));
+  } catch (e) {}
+  const saveCfg = () => {
+    try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) {}
+  };
+
+  /* ===================================================================
+     ユーティリティ
+     =================================================================== */
   function extractMeta(doc) {
     const titleEl = doc.querySelector(sel.title);
     const nextEl  = doc.querySelector(sel.next);
@@ -54,18 +75,6 @@
       adNodes:  Array.from(doc.querySelectorAll(sel.ads))
     };
   }
-
-  let currentMeta = extractMeta(document);
-
-  const SK = 'vreader-settings-v2';
-  let cfg = { font: 18, theme: 'light' };
-  try {
-    const s = localStorage.getItem(SK);
-    if (s) Object.assign(cfg, JSON.parse(s));
-  } catch (e) {}
-  const saveCfg = () => {
-    try { localStorage.setItem(SK, JSON.stringify(cfg)); } catch (e) {}
-  };
 
   function applyTcy(node) {
     const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
@@ -90,7 +99,11 @@
       c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
   }
 
-  /* -------- DOM 構築 -------- */
+  let currentMeta = extractMeta(document);
+
+  /* ===================================================================
+     DOM 構築
+     =================================================================== */
   const root = document.createElement('div');
   root.id = 'vreader-root';
   root.dataset.theme = cfg.theme;
@@ -120,6 +133,9 @@
   bodyContainer.appendChild(sourceBody.cloneNode(true));
   applyTcy(bodyContainer);
 
+  /* ===================================================================
+     スタイル注入
+     =================================================================== */
   const style = document.createElement('style');
   style.id = 'vreader-style';
   style.textContent = `
@@ -148,14 +164,12 @@
       height: 100%;
       writing-mode: vertical-rl;
       box-sizing: border-box;
-      font-size: ${cfg.font}px;
       letter-spacing: 0.1em;
       -webkit-text-size-adjust: none;
-      text-size-adjust: none;  
+      text-size-adjust: none;
     }
     #vreader-body { height: 100%; }
     #vreader-body p { margin: 0 0 1em 0; text-indent: 1em; }
-    #vreader-body ruby rt { font-size: .5em; }
     #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
 
@@ -222,6 +236,9 @@
   document.head.appendChild(style);
   document.body.appendChild(root);
 
+  /* ===================================================================
+     要素参照
+     =================================================================== */
   const frame    = root.querySelector('#vreader-frame');
   const track    = root.querySelector('#vreader-track');
   const bodyWrap = root.querySelector('#vreader-body-wrap');
@@ -230,12 +247,82 @@
   const info     = root.querySelector('#vreader-info');
   const loading  = root.querySelector('#vreader-loading');
 
+  /* ===================================================================
+     状態変数
+     =================================================================== */
   let curPage = 0;
   let totalPages = 0;
   let bodyPages = 0;
   let pageWidth = 0;
 
-  /* -------- 章末ページの更新 -------- */
+  /* ===================================================================
+     フォント関連スタイルを一元適用（ここ以外では書かない）
+     =================================================================== */
+  function applyFontStyles() {
+    const fs = cfg.font + 'px';
+    const lh = (cfg.font + 14) + 'px';
+    bodyWrap.style.setProperty('font-size', fs, 'important');
+    bodyWrap.style.setProperty('line-height', lh, 'important');
+    bodyContainer.querySelectorAll('*').forEach(el => {
+      if (el.tagName === 'RT' || el.tagName === 'RP') {
+        el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+        el.style.setProperty('line-height', '1', 'important');
+      } else {
+        el.style.setProperty('font-size', fs, 'important');
+        el.style.setProperty('line-height', lh, 'important');
+      }
+    });
+  }
+
+  /* ===================================================================
+     1列の幅を実測（見切れ根絶の鍵）
+     =================================================================== */
+  function measureColumnWidth() {
+    // line-heightの実計算値を取得。縦書きでは1列の幅に相当する。
+    const lh = parseFloat(getComputedStyle(bodyWrap).lineHeight);
+    const fallback = cfg.font + 14;
+    return Math.ceil(isFinite(lh) && lh > 0 ? lh : fallback);
+  }
+
+  /* ===================================================================
+     ページ計測（pageWidth を列幅の整数倍にする）
+     =================================================================== */
+  function measure() {
+    const frameWidth = Math.floor(frame.clientWidth);
+    const columnWidth = measureColumnWidth();
+    const columnsPerPage = Math.max(1, Math.floor(frameWidth / columnWidth));
+    pageWidth = columnsPerPage * columnWidth;
+
+    bodyWrap.style.minWidth = '';
+    bodyWrap.style.width = pageWidth + 'px';
+    endPage.style.width = pageWidth + 'px';
+
+    void bodyWrap.offsetHeight;
+    const w = bodyWrap.scrollWidth;
+    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
+    const totalWidth = bodyPages * pageWidth;
+    bodyWrap.style.width = totalWidth + 'px';
+    bodyWrap.style.minWidth = totalWidth + 'px';
+    totalPages = bodyPages + 1;
+    updateInfo();
+  }
+
+  function updateInfo() {
+    info.textContent = `${curPage + 1} / ${totalPages}`;
+  }
+
+  function goTo(n) {
+    n = Math.max(0, Math.min(totalPages - 1, n));
+    curPage = n;
+    track.style.transform = `translateX(${n * pageWidth}px)`;
+    updateInfo();
+  }
+
+  const isOnEndPage = () => curPage === totalPages - 1;
+
+  /* ===================================================================
+     章末ページの更新
+     =================================================================== */
   function updateEndPage() {
     const { title, nextHref, prevHref, adNodes } = currentMeta;
 
@@ -279,40 +366,9 @@
 
   updateEndPage();
 
-  /* -------- ページ計測 -------- */
-  function measure() {
-    const frameWidth = Math.floor(frame.clientWidth);
-    const lineHeight = cfg.font + 14;  // 1列の幅
-    const columnsPerPage = Math.max(1, Math.floor(frameWidth / lineHeight));
-    pageWidth = columnsPerPage * lineHeight;  // 列幅の整数倍に丸める
-
-    bodyWrap.style.minWidth = '';
-    bodyWrap.style.width = pageWidth + 'px';
-    endPage.style.width = pageWidth + 'px';
-
-    void bodyWrap.offsetHeight;
-    const w = bodyWrap.scrollWidth;
-    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
-    bodyWrap.style.width = (bodyPages * pageWidth) + 'px';
-    bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
-    totalPages = bodyPages + 1;
-    updateInfo();
-  }
-
-  function updateInfo() {
-    info.textContent = `${curPage + 1} / ${totalPages} `;
-  }
-
-  function goTo(n) {
-    n = Math.max(0, Math.min(totalPages - 1, n));
-    curPage = n;
-    track.style.transform = `translateX(${Math.round(n * pageWidth)}px)`;  // 整数化
-    updateInfo();
-  }
-
-  const isOnEndPage = () => curPage === totalPages - 1;
-
-  /* -------- エピソード遷移（シームレス） -------- */
+  /* ===================================================================
+     エピソード遷移（シームレス）
+     =================================================================== */
   let loadingEpisode = false;
   async function loadEpisode(url) {
     if (loadingEpisode) return;
@@ -328,29 +384,17 @@
       const newBody = doc.querySelector(sel.body);
       if (!newBody) throw new Error('body not found');
 
-      // 本文を差し替え
       bodyContainer.innerHTML = '';
       bodyContainer.appendChild(newBody.cloneNode(true));
       applyTcy(bodyContainer);
-      const fs1 = cfg.font + 'px';
-      bodyContainer.querySelectorAll('*').forEach(el => {
-        if (el.tagName === 'RT' || el.tagName === 'RP') {
-          el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
-        } else {
-          el.style.setProperty('font-size', fs1, 'important');
-        }
-      }); 
+      applyFontStyles();
 
-      // メタ情報を新しいDOMから取り直す
       currentMeta = extractMeta(doc);
       updateEndPage();
 
-      // ブラウザ履歴を更新
       history.pushState({ vreader: true }, '', url);
-      // タイトルも更新
       if (currentMeta.title) document.title = currentMeta.title;
 
-      // スクロールを先頭に戻し、再計測
       bodyWrap.scrollTop = 0;
       setTimeout(() => {
         measure();
@@ -364,14 +408,14 @@
       console.error('[vreader] loadEpisode error:', err);
       loading.classList.remove('show');
       loadingEpisode = false;
-      // フォールバック：通常遷移
       location.href = url;
     }
   }
 
-  /* -------- タップ処理 -------- */
+  /* ===================================================================
+     タップ処理
+     =================================================================== */
   function onTap(e) {
-    // 章末ページのナビリンクは loadEpisode で処理
     const navLink = e.target.closest('[data-nav]');
     if (navLink) {
       e.preventDefault();
@@ -393,64 +437,51 @@
 
     if (y < h * 0.12) { bar.classList.toggle('show'); return; }
 
-    // 章末ページ：左1/3タップで次話（一貫性のため）
     if (isOnEndPage() && currentMeta.nextHref && x < w / 3) {
       loadEpisode(currentMeta.nextHref);
       return;
     }
 
-    if (x < w / 3)             goTo(curPage + 1);
-    else if (x > w * 2 / 3)    goTo(curPage - 1);
+    if (x < w / 3)          goTo(curPage + 1);
+    else if (x > w * 2 / 3) goTo(curPage - 1);
   }
   root.addEventListener('click', onTap);
 
-  /* -------- 設定バー -------- */
+  /* ===================================================================
+     設定バー
+     =================================================================== */
   bar.addEventListener('click', e => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
     const act = btn.dataset.act;
     e.stopPropagation();
-    if      (act === 'font-dec') cfg.font = Math.max(16, cfg.font - 1);
-    else if (act === 'font-inc') cfg.font = Math.min(30, cfg.font + 1);
+
+    if      (act === 'font-dec') cfg.font = Math.max(12, cfg.font - 1);
+    else if (act === 'font-inc') cfg.font = Math.min(40, cfg.font + 1);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
-    const fs = cfg.font + 'px';
-    bodyWrap.style.setProperty('font-size', fs, 'important');
-    bodyWrap.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
-    bodyContainer.querySelectorAll('*').forEach(el => {
-      if (el.tagName === 'RT' || el.tagName === 'RP') {
-        el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
-      } else {
-        el.style.setProperty('font-size', fs, 'important');
-      }
-    });
+
+    applyFontStyles();
     root.dataset.theme = cfg.theme;
     saveCfg();
     setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
   });
 
-  /* -------- ブラウザの戻る/進む対応 -------- */
+  /* ===================================================================
+     ブラウザ戻る/進む
+     =================================================================== */
   window.addEventListener('popstate', (e) => {
-    // pushStateで作った履歴から戻る/進むがあった場合、現在のURLの内容を読み込み直す
     if (e.state && e.state.vreader) {
       loadEpisode(location.href);
     } else {
-      // リーダー起動前の状態に戻った場合はリロード
       location.reload();
     }
   });
 
-  /* -------- 起動 & リサイズ -------- */
-  const fs0 = cfg.font + 'px';
-  bodyWrap.style.setProperty('font-size', fs0, 'important');
-  bodyWrap.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
-  bodyContainer.querySelectorAll('*').forEach(el => {
-    if (el.tagName === 'RT' || el.tagName === 'RP') {
-      el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
-    } else {
-      el.style.setProperty('font-size', fs0, 'important');
-    }
-  });
+  /* ===================================================================
+     起動 & リサイズ
+     =================================================================== */
+  applyFontStyles();
   setTimeout(() => { measure(); goTo(0); }, 150);
 
   let resizeTimer;
