@@ -383,7 +383,7 @@
     frame.style.width = pageWidth + 'px';
 
     // マスク幅：余白 + 少しのバッファで見切れを覆う
-    const maskWidth = sideMargin + 12;
+    const maskWidth = sideMargin + (cfg.font + 14) + 4;  // 1列分 + 余裕
     maskL.style.width = maskWidth + 'px';
     maskR.style.width = maskWidth + 'px';
 
