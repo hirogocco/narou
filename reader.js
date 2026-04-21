@@ -1,6 +1,7 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v11 — 1列オーバーラップ方式（見切れ完全解決）＋ アニメなしページ切替
+   v12 — scroller幅を列幅の整数倍にして見切れ完全解決
+         direction:rtl で scrollLeft は負の値 / アニメなし
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -225,7 +226,7 @@
     #vreader-scroller::-webkit-scrollbar { display: none; }
 
     #vreader-body {
-    　display: inline-block;
+      display: inline-block;
       height: 100%;
       writing-mode: vertical-rl;
       direction: ltr;
@@ -344,35 +345,25 @@
   }
 
   /* ===================================================================
-     ページ計測：1列オーバーラップ方式
+     ページ計測：scroller幅を列幅の整数倍に固定
      =================================================================== */
   function measure() {
     const viewportWidth = window.innerWidth;
     const availableWidth = viewportWidth * 0.8;
 
-    // 実測の列幅
+    // 実測の列幅（line-height）
     const cs = getComputedStyle(bodyContainer);
     const measured = parseFloat(cs.lineHeight);
     columnWidth = (measured && !isNaN(measured) && measured > 10)
       ? measured
       : (cfg.font + 14);
 
-   const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
+    // 1ページに入る列数（切り捨て）
+    const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
+    stepWidth = pageWidth;  // オーバーラップなし
 
-    // ページ送りのステップ：オーバーラップなし（列境界で切る）
-    stepWidth = pageWidth;
-
-    // scrollerの幅を pageWidth ぴったりに固定
-    const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
-    scroller.style.left = sideMargin + 'px';
-    scroller.style.right = 'auto';
-    scroller.style.width = pageWidth + 'px';
-    endPage.style.left = sideMargin + 'px';
-    endPage.style.right = 'auto';
-    endPage.style.width = pageWidth + 'px';
-
-
+    // scrollerの幅を pageWidth ぴったりに固定して中央配置
     const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
     scroller.style.left = sideMargin + 'px';
     scroller.style.right = 'auto';
@@ -385,12 +376,7 @@
     void scroller.offsetWidth;
 
     const sw = scroller.scrollWidth;
-    // 総ページ数：先頭ページで pageWidth 分見せ、以降 stepWidth ずつ進む
-    if (sw <= pageWidth) {
-      bodyPages = 1;
-    } else {
-      bodyPages = 1 + Math.ceil((sw - pageWidth) / stepWidth);
-    }
+    bodyPages = Math.max(1, Math.ceil(sw / pageWidth));
     totalPages = bodyPages + 1;
     updateInfo();
   }
@@ -400,7 +386,7 @@
   }
 
   /* ===================================================================
-     ページ移動：アニメなしで瞬時切替
+     ページ移動：アニメなし、scrollLeftは負の値
      =================================================================== */
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
@@ -568,7 +554,6 @@
     applyFontStyles();
     root.dataset.theme = cfg.theme;
     saveCfg();
-    // フォント変更後はページ位置の割合を保持して再配置
     const prevRatio = totalPages > 0 ? curPage / totalPages : 0;
     deferredMeasure(() => {
       goTo(Math.round(prevRatio * totalPages));
