@@ -324,6 +324,14 @@
       bodyContainer.innerHTML = '';
       bodyContainer.appendChild(newBody.cloneNode(true));
       applyTcy(bodyContainer);
+      const fs1 = cfg.font + 'px';
+      bodyContainer.querySelectorAll('*').forEach(el => {
+        if (el.tagName === 'RT' || el.tagName === 'RP') {
+          el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+        } else {
+          el.style.setProperty('font-size', fs1, 'important');
+        }
+      }); 
 
       // メタ情報を新しいDOMから取り直す
       currentMeta = extractMeta(doc);
@@ -398,8 +406,16 @@
     else if (act === 'font-inc') cfg.font = Math.min(100, cfg.font + 5);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
-    bodyWrap.style.fontSize = cfg.font + 'px';
-    bodyWrap.style.lineHeight = (cfg.font + 14) + 'px';
+    const fs = cfg.font + 'px';
+    bodyWrap.style.setProperty('font-size', fs, 'important');
+    bodyWrap.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+    bodyContainer.querySelectorAll('*').forEach(el => {
+      if (el.tagName === 'RT' || el.tagName === 'RP') {
+        el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+      } else {
+        el.style.setProperty('font-size', fs, 'important');
+      }
+    });
     root.dataset.theme = cfg.theme;
     saveCfg();
     setTimeout(() => { measure(); goTo(Math.min(curPage, totalPages - 1)); }, 50);
@@ -417,7 +433,16 @@
   });
 
   /* -------- 起動 & リサイズ -------- */
-  bodyWrap.style.lineHeight = (cfg.font + 14) + 'px'; 
+  const fs0 = cfg.font + 'px';
+  bodyWrap.style.setProperty('font-size', fs0, 'important');
+  bodyWrap.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+  bodyContainer.querySelectorAll('*').forEach(el => {
+    if (el.tagName === 'RT' || el.tagName === 'RP') {
+      el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+    } else {
+      el.style.setProperty('font-size', fs0, 'important');
+    }
+  });
   setTimeout(() => { measure(); goTo(0); }, 150);
 
   let resizeTimer;
