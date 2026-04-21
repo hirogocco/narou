@@ -278,20 +278,26 @@
      1列の幅を実測（見切れ根絶の鍵）
      =================================================================== */
   function measureColumnWidth() {
-    // line-heightの実計算値を取得。縦書きでは1列の幅に相当する。
     const lh = parseFloat(getComputedStyle(bodyWrap).lineHeight);
     const fallback = cfg.font + 14;
-    return Math.ceil(isFinite(lh) && lh > 0 ? lh : fallback);
+    return isFinite(lh) && lh > 0 ? lh : fallback;  // 切り上げしない
   }
 
   /* ===================================================================
      ページ計測（pageWidth を列幅の整数倍にする）
      =================================================================== */
   function measure() {
-    const frameWidth = Math.floor(frame.clientWidth);
+    const parentWidth = root.clientWidth;
+    const targetFrameWidth = parentWidth * 0.8;  // 80vw相当
     const columnWidth = measureColumnWidth();
-    const columnsPerPage = Math.max(1, Math.floor(frameWidth / columnWidth));
+    const columnsPerPage = Math.max(1, Math.floor(targetFrameWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
+
+    // frameをpageWidthに厳密に合わせて中央配置（これが見切れ防止の鍵）
+    const sideMargin = (parentWidth - pageWidth) / 2;
+    frame.style.left = sideMargin + 'px';
+    frame.style.right = sideMargin + 'px';
+    frame.style.width = pageWidth + 'px';
 
     bodyWrap.style.minWidth = '';
     bodyWrap.style.width = pageWidth + 'px';
