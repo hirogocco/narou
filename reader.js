@@ -225,6 +225,7 @@
     #vreader-scroller::-webkit-scrollbar { display: none; }
 
     #vreader-body {
+    　display: inline-block;
       height: 100%;
       writing-mode: vertical-rl;
       direction: ltr;
@@ -356,11 +357,21 @@
       ? measured
       : (cfg.font + 14);
 
-    const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
+   const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
 
-    // ページ送りのステップ：1列ぶんオーバーラップ
-    stepWidth = pageWidth - columnWidth;
+    // ページ送りのステップ：オーバーラップなし（列境界で切る）
+    stepWidth = pageWidth;
+
+    // scrollerの幅を pageWidth ぴったりに固定
+    const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
+    scroller.style.left = sideMargin + 'px';
+    scroller.style.right = 'auto';
+    scroller.style.width = pageWidth + 'px';
+    endPage.style.left = sideMargin + 'px';
+    endPage.style.right = 'auto';
+    endPage.style.width = pageWidth + 'px';
+
 
     const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
     scroller.style.left = sideMargin + 'px';
