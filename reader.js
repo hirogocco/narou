@@ -1,7 +1,7 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v12 — scroller幅を列幅の整数倍にして見切れ完全解決
-         direction:rtl で scrollLeft は負の値 / アニメなし
+   v13 — 段落単位ページ割り付け方式
+         各ページが独立したDOMコンテナ。サブピクセル誤差問題を根絶。
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -159,14 +159,29 @@
     });
   }
 
-  function replaceBody(srcElement, bodyContainer) {
-    bodyContainer.innerHTML = '';
-    const sanitized = sanitizeBody(srcElement);
-    Array.from(sanitized.childNodes).forEach(n => bodyContainer.appendChild(n));
-    applyTcy(bodyContainer);
-  }
-
+  /* ===================================================================
+     状態変数
+     =================================================================== */
+  let sourceParagraphs = [];  // 元の<p>要素の配列（DOMには未接続）
+  let pages = [];              // 各ページの段落配列 [[p1,p2], [p3,p4,p5], ...]
+  let pageDivs = [];           // レンダリング済みの.vr-page DOM要素の配列
+  let curPage = 0;
+  let totalPages = 0;
+  let bodyPages = 0;
+  let pageWidth = 0;
+  let pageHeight = 0;
+  let columnWidth = 0;
   let currentMeta = extractMeta(document);
+
+  /* ===================================================================
+     ソース読み込み：サニタイズして sourceParagraphs を更新
+     =================================================================== */
+  function loadSource(srcElement) {
+    const sanitized = sanitizeBody(srcElement);
+    applyTcy(sanitized);
+    sourceParagraphs = Array.from(sanitized.querySelectorAll('p'));
+  }
+  loadSource(sourceBody);
 
   /* ===================================================================
      DOM 構築
@@ -175,9 +190,8 @@
   root.id = 'vreader-root';
   root.dataset.theme = cfg.theme;
   root.innerHTML = `
-    <div id="vreader-scroller">
-      <div id="vreader-body"></div>
-    </div>
+    <div id="vreader-pages"></div>
+    <div id="vreader-testpage"></div>
     <div id="vreader-end">
       <div class="vr-end-title"></div>
       <div class="vr-end-ads"></div>
@@ -194,9 +208,6 @@
     <div id="vreader-loading">読み込み中…</div>
   `;
 
-  const bodyContainer = root.querySelector('#vreader-body');
-  replaceBody(sourceBody, bodyContainer);
-
   /* ===================================================================
      スタイル注入
      =================================================================== */
@@ -212,41 +223,43 @@
     #vreader-root[data-theme="light"] { background: #f5efe2; color: #2a2620; }
     #vreader-root[data-theme="dark"]  { background: #181614; color: #d4cfc6; }
 
-    #vreader-scroller {
+    #vreader-pages {
       position: absolute;
-      top: 4vh; bottom: 6vh; left: 10vw; right: 10vw;
-      overflow-x: auto;
-      overflow-y: hidden;
-      direction: rtl;
-      -webkit-overflow-scrolling: auto;
-      touch-action: none;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      scroll-snap-type: none;
-      overscroll-behavior: contain;
+      top: 4vh; bottom: 6vh;
     }
-    #vreader-scroller::-webkit-scrollbar { display: none; }
 
-    #vreader-body {
-      display: inline-block;
-      height: 100%;
-      box-sizing: border-box;
-      vertical-align: top;
+    .vr-page, #vreader-testpage {
       writing-mode: vertical-rl;
       direction: ltr;
       letter-spacing: 0.1em;
       -webkit-text-size-adjust: none;
       text-size-adjust: none;
+      overflow: hidden;
     }
-    #vreader-body p { margin: 0; text-indent: 1em; }
-    #vreader-body br { display: block; content: ""; }
-    #vreader-body ruby { display: inline; }
-    #vreader-body rt { font-size: .5em; line-height: 1; }
+    .vr-page p, #vreader-testpage p { margin: 0; text-indent: 1em; }
+    .vr-page br, #vreader-testpage br { display: block; content: ""; }
+    .vr-page ruby, #vreader-testpage ruby { display: inline; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
+
+    .vr-page {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 0; right: 0;
+      display: none;
+    }
+    .vr-page.active { display: block; }
+
+    #vreader-testpage {
+      position: fixed;
+      top: -100000px;
+      left: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
 
     #vreader-end {
       position: absolute;
-      top: 4vh; bottom: 6vh; left: 10vw; right: 10vw;
+      top: 4vh; bottom: 6vh;
       writing-mode: horizontal-tb;
       box-sizing: border-box;
       display: none;
@@ -313,21 +326,12 @@
   /* ===================================================================
      要素参照
      =================================================================== */
-  const scroller = root.querySelector('#vreader-scroller');
-  const endPage  = root.querySelector('#vreader-end');
-  const bar      = root.querySelector('#vreader-bar');
-  const info     = root.querySelector('#vreader-info');
-  const loading  = root.querySelector('#vreader-loading');
-
-  /* ===================================================================
-     状態変数
-     =================================================================== */
-  let curPage = 0;
-  let totalPages = 0;
-  let bodyPages = 0;
-  let pageWidth = 0;
-  let columnWidth = 0;
-  let stepWidth = 0;
+  const pagesWrap = root.querySelector('#vreader-pages');
+  const testPage  = root.querySelector('#vreader-testpage');
+  const endPage   = root.querySelector('#vreader-end');
+  const bar       = root.querySelector('#vreader-bar');
+  const info      = root.querySelector('#vreader-info');
+  const loading   = root.querySelector('#vreader-loading');
 
   /* ===================================================================
      フォント適用
@@ -335,105 +339,255 @@
   function applyFontStyles() {
     const fs = cfg.font + 'px';
     const lh = (cfg.font + 14) + 'px';
-    bodyContainer.style.setProperty('font-size', fs, 'important');
-    bodyContainer.style.setProperty('line-height', lh, 'important');
-    bodyContainer.querySelectorAll('*').forEach(el => {
-      if (el.tagName === 'RT' || el.tagName === 'RP') {
-        el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
-        el.style.setProperty('line-height', '1', 'important');
-      } else {
-        el.style.setProperty('font-size', fs, 'important');
-        el.style.setProperty('line-height', lh, 'important');
-      }
-    });
+
+    // 親要素に設定（子要素に継承させる）
+    pagesWrap.style.setProperty('font-size', fs, 'important');
+    pagesWrap.style.setProperty('line-height', lh, 'important');
+    testPage.style.setProperty('font-size', fs, 'important');
+    testPage.style.setProperty('line-height', lh, 'important');
+
+    // ソース段落にも直接設定（クローン時に引き継がれる）
+    for (const p of sourceParagraphs) {
+      p.style.setProperty('font-size', fs, 'important');
+      p.style.setProperty('line-height', lh, 'important');
+      p.querySelectorAll('*').forEach(el => {
+        if (el.tagName === 'RT' || el.tagName === 'RP') {
+          el.style.setProperty('font-size', (cfg.font * 0.5) + 'px', 'important');
+          el.style.setProperty('line-height', '1', 'important');
+        } else {
+          el.style.setProperty('font-size', fs, 'important');
+          el.style.setProperty('line-height', lh, 'important');
+        }
+      });
+    }
   }
 
   /* ===================================================================
-     ページ計測：scroller幅を列幅の整数倍に固定
+     列幅の実測
+     =================================================================== */
+  function measureColumnWidth() {
+    const t = document.createElement('div');
+    t.style.cssText = `
+      position: fixed;
+      top: -100000px; left: 0;
+      visibility: hidden;
+      writing-mode: vertical-rl;
+      font-size: ${cfg.font}px;
+      line-height: ${cfg.font + 14}px;
+      letter-spacing: 0.1em;
+    `;
+    t.textContent = '測';
+    document.body.appendChild(t);
+    const w = t.getBoundingClientRect().width;
+    document.body.removeChild(t);
+    return w || (cfg.font + 14);
+  }
+
+  /* ===================================================================
+     ページ寸法の計測
      =================================================================== */
   function measure() {
     const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
     const availableWidth = viewportWidth * 0.8;
+    const availableHeight = viewportHeight * 0.9;  // top:4vh + bottom:6vh = 10vh
 
-    // 実測の列幅（line-height）
-    const cs = getComputedStyle(bodyContainer);
-    const measured = parseFloat(cs.lineHeight);
-    columnWidth = (measured && !isNaN(measured) && measured > 10)
-      ? measured
-      : (cfg.font + 14);
+    columnWidth = measureColumnWidth();
 
-    // 1ページに入る列数（切り捨て）
     const columnsPerPage = Math.max(2, Math.floor(availableWidth / columnWidth));
     pageWidth = columnsPerPage * columnWidth;
-    stepWidth = pageWidth - columnWidth;  // 最右列を次ページの最右に持ってくる
+    pageHeight = Math.floor(availableHeight);
 
-    // scrollerの幅を pageWidth ぴったりに固定して中央配置
     const sideMargin = Math.floor((viewportWidth - pageWidth) / 2);
-    scroller.style.left = sideMargin + 'px';
-    scroller.style.right = 'auto';
-    scroller.style.width = pageWidth + 'px';
+    pagesWrap.style.left = sideMargin + 'px';
+    pagesWrap.style.width = pageWidth + 'px';
 
     endPage.style.left = sideMargin + 'px';
     endPage.style.right = 'auto';
     endPage.style.width = pageWidth + 'px';
 
-    void scroller.offsetWidth;
-
-    const sw = scroller.scrollWidth;
-    bodyPages = Math.max(1, Math.ceil(sw / pageWidth));
-    totalPages = bodyPages + 1;
-
-   // デバッグ：最初の段落の実際の幅を測る
-    const firstP = bodyContainer.querySelector('p');
-    const firstPWidth = firstP ? firstP.offsetWidth : 0;
-    console.log('[vreader] columnWidth(line-height):', columnWidth, 'firstP.offsetWidth:', firstPWidth);
-    window._vrDebug = { columnWidth, firstPWidth, pageWidth, stepWidth };
-
-     
-    updateInfo();
+    testPage.style.width = pageWidth + 'px';
+    testPage.style.height = pageHeight + 'px';
   }
-
-    function updateInfo() {
-    const d = window._vrDebug || {};
-    info.textContent = `${curPage + 1}/${totalPages} step:${stepWidth} target:${d.target} actual:${d.actual}`;
-  }
-
-
 
   /* ===================================================================
-     ページ移動：アニメなし、scrollLeftは負の値
+     段落割り付け：sourceParagraphs を pages に分配
+     =================================================================== */
+  function fitsInTestPage() {
+    // testPage の内容幅が pageWidth 以内に収まるか
+    return testPage.scrollWidth <= pageWidth;
+  }
+
+  function splitOversizedParagraph(p) {
+    // 長すぎる段落を文字単位でバイナリサーチ、可能なら。で区切る
+    const text = p.textContent;
+    const pieces = [];
+    let remaining = text;
+
+    while (remaining.length > 0) {
+      // 最大何文字入るか二分探索
+      let lo = 1, hi = remaining.length;
+      let best = 1;
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const newP = document.createElement('p');
+        newP.textContent = remaining.substring(0, mid);
+        // フォントスタイルを継承させるため、親のスタイルだけでは不安なので明示
+        newP.style.setProperty('font-size', cfg.font + 'px', 'important');
+        newP.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+        testPage.innerHTML = '';
+        testPage.appendChild(newP);
+        if (fitsInTestPage()) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      // 可能なら「。」で区切る
+      let splitAt = best;
+      const pieceText = remaining.substring(0, best);
+      const lastPeriod = pieceText.lastIndexOf('。');
+      if (lastPeriod > 0 && lastPeriod + 1 <= best) {
+        splitAt = lastPeriod + 1;
+      }
+
+      const newP = document.createElement('p');
+      newP.textContent = remaining.substring(0, splitAt);
+      newP.style.setProperty('font-size', cfg.font + 'px', 'important');
+      newP.style.setProperty('line-height', (cfg.font + 14) + 'px', 'important');
+      pieces.push(newP);
+      remaining = remaining.substring(splitAt);
+    }
+
+    testPage.innerHTML = '';
+    return pieces;
+  }
+
+  function paginate() {
+    pages = [[]];
+    testPage.innerHTML = '';
+
+    function currentPageArr() {
+      return pages[pages.length - 1];
+    }
+
+    function newPage() {
+      pages.push([]);
+      testPage.innerHTML = '';
+    }
+
+    // 現在ページに段落を追加試行。成功なら true、失敗なら testPage を元に戻して false
+    function tryAdd(p) {
+      const clone = p.cloneNode(true);
+      testPage.appendChild(clone);
+      if (fitsInTestPage()) {
+        currentPageArr().push(p);
+        return true;
+      } else {
+        testPage.removeChild(clone);
+        return false;
+      }
+    }
+
+    for (const p of sourceParagraphs) {
+      if (tryAdd(p)) continue;
+
+      // 現ページに入らない。現ページが空でなければ新規ページへ
+      if (currentPageArr().length > 0) {
+        newPage();
+      }
+
+      // 空のページで再挑戦
+      if (tryAdd(p)) continue;
+
+      // 空のページでも入らない → 分割
+      const pieces = splitOversizedParagraph(p);
+
+      for (const piece of pieces) {
+        if (tryAdd(piece)) continue;
+
+        if (currentPageArr().length > 0) {
+          newPage();
+        }
+
+        if (tryAdd(piece)) continue;
+
+        // バイナリサーチで作った断片なので入るはず。念のため追加。
+        currentPageArr().push(piece);
+        testPage.appendChild(piece.cloneNode(true));
+      }
+    }
+
+    testPage.innerHTML = '';
+    bodyPages = Math.max(1, pages.length);
+  }
+
+  /* ===================================================================
+     ページDOMの構築
+     =================================================================== */
+  function renderPages() {
+    pagesWrap.innerHTML = '';
+    pageDivs = [];
+
+    for (let i = 0; i < pages.length; i++) {
+      const pageDiv = document.createElement('div');
+      pageDiv.className = 'vr-page';
+      pageDiv.dataset.idx = i;
+      for (const p of pages[i]) {
+        pageDiv.appendChild(p.cloneNode(true));
+      }
+      pagesWrap.appendChild(pageDiv);
+      pageDivs.push(pageDiv);
+    }
+  }
+
+  /* ===================================================================
+     一括処理：計測 → 割り付け → レンダリング
+     =================================================================== */
+  function rebuildPages() {
+    measure();
+    paginate();
+    renderPages();
+    totalPages = bodyPages + 1;  // +1 は章末ページ
+  }
+
+  function deferredRebuild(afterFn) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        rebuildPages();
+        if (afterFn) afterFn();
+      });
+    });
+  }
+
+  /* ===================================================================
+     ページ移動
      =================================================================== */
   function goTo(n) {
     n = Math.max(0, Math.min(totalPages - 1, n));
     curPage = n;
+
     if (n < bodyPages) {
       endPage.classList.remove('show');
-      scroller.style.display = 'block';
-      const target = -(n * stepWidth);
-      scroller.scrollLeft = target;
-      // 実際のscrollLeftを記録
-      window._vrDebug = window._vrDebug || {};
-      window._vrDebug.target = target;
-      window._vrDebug.actual = scroller.scrollLeft;
+      for (let i = 0; i < pageDivs.length; i++) {
+        pageDivs[i].classList.toggle('active', i === n);
+      }
     } else {
+      // 章末ページ
+      for (const pd of pageDivs) pd.classList.remove('active');
       endPage.classList.add('show');
     }
     updateInfo();
   }
 
-  // 互換のため別名でも同じ挙動に
   const goToInstant = goTo;
 
   const isOnEndPage = () => curPage === totalPages - 1;
 
-  function deferredMeasure(afterFn) {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        void bodyContainer.offsetWidth;
-        measure();
-        if (afterFn) afterFn();
-      });
-    });
+  function updateInfo() {
+    info.textContent = `${curPage + 1} / ${totalPages}`;
   }
 
   /* ===================================================================
@@ -499,7 +653,7 @@
       const newBody = doc.querySelector(sel.body);
       if (!newBody) throw new Error('body not found');
 
-      replaceBody(newBody, bodyContainer);
+      loadSource(newBody);
       applyFontStyles();
 
       currentMeta = extractMeta(doc);
@@ -508,7 +662,7 @@
       history.pushState({ vreader: true }, '', url);
       if (currentMeta.title) document.title = currentMeta.title;
 
-      deferredMeasure(() => {
+      deferredRebuild(() => {
         goTo(0);
         loading.classList.remove('show');
         loadingEpisode = false;
@@ -571,13 +725,18 @@
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
 
-    applyFontStyles();
     root.dataset.theme = cfg.theme;
     saveCfg();
-    const prevRatio = totalPages > 0 ? curPage / totalPages : 0;
-    deferredMeasure(() => {
-      goTo(Math.round(prevRatio * totalPages));
-    });
+
+    if (act === 'font-dec' || act === 'font-inc') {
+      // フォント変更時は再割り付け
+      const prevRatio = totalPages > 0 ? curPage / totalPages : 0;
+      applyFontStyles();
+      deferredRebuild(() => {
+        goTo(Math.round(prevRatio * totalPages));
+      });
+    }
+    // 配色変更はレイアウト再計算不要
   });
 
   /* ===================================================================
@@ -595,14 +754,14 @@
      起動 & リサイズ
      =================================================================== */
   applyFontStyles();
-  deferredMeasure(() => goTo(0));
+  deferredRebuild(() => goTo(0));
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = totalPages > 0 ? curPage / totalPages : 0;
-      deferredMeasure(() => goTo(Math.round(ratio * totalPages)));
+      deferredRebuild(() => goTo(Math.round(ratio * totalPages)));
     }, 200);
   });
 })();
