@@ -397,7 +397,7 @@
     if (n < bodyPages) {
       endPage.classList.remove('show');
       scroller.style.display = 'block';
-      scroller.scrollLeft = n * stepWidth;
+      scroller.scrollLeft = -(n * stepWidth);
     } else {
       endPage.classList.add('show');
     }
