@@ -22,11 +22,11 @@
 
   const SEL = {
     narou: {
-　　　  body:  '.p-novel__body, #novel_honbun',
-　　　  title: '.p-novel__title, .novel_subtitle',
-　　　  next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
-　　　  prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
-　　　  ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'  
+       body:  '.p-novel__body, #novel_honbun',
+       title: '.p-novel__title, .novel_subtitle',
+       next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
+       prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
+       ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'  
 　　　},
 
     kakuyomu: {
@@ -66,14 +66,28 @@
   /* ===================================================================
      ユーティリティ
      =================================================================== */
-  function extractMeta(doc) {
+  function extractMeta(doc, sourceUrl) {
     const titleEl = doc.querySelector(sel.title);
     const nextEl  = doc.querySelector(sel.next);
     const prevEl  = doc.querySelector(sel.prev);
+    let nextHref = (nextEl && nextEl.href) ? nextEl.href : null;
+    let prevHref = (prevEl && prevEl.href) ? prevEl.href : null;
+
+    // なろうはURLが連番なので、DOMで取れなければURLから導出
+    if (SITE === 'narou' && sourceUrl) {
+      const m = sourceUrl.match(/^(https?:\/\/[^?#]+\/)(\d+)\/?(?:[?#].*)?$/);
+      if (m) {
+        const base = m[1];
+        const num = parseInt(m[2], 10);
+        if (!prevHref && num > 1) prevHref = `${base}${num - 1}/`;
+        // nextHref は補完しない（最終話判定が壊れるため）
+      }
+    }
+
     return {
       title:    titleEl ? titleEl.textContent.trim() : '',
-      nextHref: (nextEl && nextEl.href) ? nextEl.href : null,
-      prevHref: (prevEl && prevEl.href) ? prevEl.href : null,
+      nextHref,
+      prevHref,
       adNodes:  Array.from(doc.querySelectorAll(sel.ads))
     };
   }
@@ -172,7 +186,7 @@
   let pageWidth = 0;
   let pageHeight = 0;
   let columnWidth = 0;
-  let currentMeta = extractMeta(document);
+  let currentMeta = extractMeta(document, location.href);
 
   /* ===================================================================
      ソース読み込み：サニタイズして sourceParagraphs を更新
@@ -659,7 +673,7 @@
       loadSource(newBody);
       applyFontStyles();
 
-      currentMeta = extractMeta(doc);
+      currentMeta = extractMeta(doc, url);
       updateEndPage();
 
       history.pushState({ vreader: true }, '', url);
@@ -724,11 +738,10 @@
     e.stopPropagation();
 
    if (act === 'prev-ep') {
-  alert('prev-ep tapped\nprevHref = ' + currentMeta.prevHref);
-  if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
-  bar.classList.remove('show');
-  return;
-}
+      if (currentMeta.prevHref) loadEpisode(currentMeta.prevHref);
+      bar.classList.remove('show');
+      return;
+    }
 
     else if (act === 'next-ep') {
       if (currentMeta.nextHref) loadEpisode(currentMeta.nextHref);
