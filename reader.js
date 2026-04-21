@@ -22,12 +22,13 @@
 
   const SEL = {
     narou: {
-      body:  '.p-novel__body, #novel_honbun',
-      title: '.p-novel__title, .novel_subtitle',
-      next:  'a.c-pager__item--next, a[rel="next"]',
-      prev:  'a.c-pager__item--prev, a[rel="prev"]',
-      ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'
-    },
+　　　  body:  '.p-novel__body, #novel_honbun',
+　　　  title: '.p-novel__title, .novel_subtitle',
+　　　  next:  'a.c-pager__item--next, a.novelview_pager-next, a[rel="next"]',
+　　　  prev:  'a.c-pager__item--prev, a.novelview_pager-before, a[rel="prev"]',
+　　　  ads:   '[id^="ad_"], .p-novel__ad, iframe[src*="googlesyndication"], iframe[src*="doubleclick"]'  
+　　　},
+
     kakuyomu: {
       body:  '.widget-episodeBody',
       title: '.widget-episodeTitle',
