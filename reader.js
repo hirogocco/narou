@@ -290,7 +290,7 @@
   }
 
   function updateInfo() {
-    info.textContent = `${curPage + 1} / ${totalPages}`;
+    info.textContent = `${curPage + 1} / ${totalPages} (${cfg.font}px)`;
   }
 
   function goTo(n) {
