@@ -1,6 +1,6 @@
 /* ======================================================================
    縦書きリーダー bookmarklet loader target  (なろう / カクヨム)
-   v8 — overflow:hidden削除 + 左右マスクで見切れ視覚対策
+   v9 — 本文サニタイズ方式（p/br/ruby/テキストのみ保持）
    ---------------------------------------------------------------------- */
 
 (function () {
@@ -76,6 +76,80 @@
     };
   }
 
+  function escapeHtml(s) {
+    return String(s).replace(/[<>&"']/g,
+      c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+
+  /* -------- 本文サニタイズ：p / br / ruby / テキスト のみ保持 --------
+     なろう・カクヨム側の余計なタグ・CSSクラス・属性を全て捨てて、
+     シンプルな構造に再構築する。これでサイト側のスタイルに影響されない。
+  -------------------------------------------------------------------- */
+  function sanitizeBody(src) {
+    const out = document.createElement('div');
+
+    // 子ノードを container に変換して追加する再帰関数
+    function appendConverted(node, container) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        container.appendChild(document.createTextNode(node.nodeValue));
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+      const tag = node.tagName;
+
+      if (tag === 'BR') {
+        container.appendChild(document.createElement('br'));
+      } else if (tag === 'RUBY') {
+        const ruby = document.createElement('ruby');
+        Array.from(node.childNodes).forEach(c => {
+          if (c.nodeType === Node.ELEMENT_NODE && (c.tagName === 'RT' || c.tagName === 'RP')) {
+            const rt = document.createElement(c.tagName.toLowerCase());
+            rt.textContent = c.textContent;
+            ruby.appendChild(rt);
+          } else if (c.nodeType === Node.TEXT_NODE) {
+            ruby.appendChild(document.createTextNode(c.nodeValue));
+          }
+        });
+        container.appendChild(ruby);
+      } else if (tag === 'P' || tag === 'DIV') {
+        // ブロック要素は段落として扱い、中身を新規Pに抽出
+        const p = document.createElement('p');
+        Array.from(node.childNodes).forEach(c => appendConverted(c, p));
+        if (p.childNodes.length > 0) out.appendChild(p);
+      } else {
+        // span, font, section など他のタグは剥がして中身だけ処理
+        Array.from(node.childNodes).forEach(c => appendConverted(c, container));
+      }
+    }
+
+    // トップレベル処理
+    let currentP = null;
+    Array.from(src.childNodes).forEach(c => {
+      if (c.nodeType === Node.ELEMENT_NODE && (c.tagName === 'P' || c.tagName === 'DIV')) {
+        appendConverted(c, out);  // P/DIVは直接outへ(中でPに変換される)
+        currentP = null;
+      } else {
+        // ルート直下のテキストや<br>や<ruby>は、直前のPに追加するか新規Pを作る
+        if (!currentP) {
+          currentP = document.createElement('p');
+          out.appendChild(currentP);
+        }
+        appendConverted(c, currentP);
+      }
+    });
+
+    // 結果が空なら、元の内容を全部1つのPに入れる(フォールバック)
+    if (out.children.length === 0) {
+      const p = document.createElement('p');
+      Array.from(src.childNodes).forEach(c => appendConverted(c, p));
+      out.appendChild(p);
+    }
+
+    return out;
+  }
+
+  /* -------- 数字に縦中横（text-combine-upright）を適用 -------- */
   function applyTcy(node) {
     const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
       acceptNode: n => /\d/.test(n.nodeValue) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT
@@ -94,9 +168,12 @@
     });
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[<>&"']/g,
-      c => ({ '<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;' }[c]));
+  /* -------- 本文を bodyContainer に差し替える（共通化） -------- */
+  function replaceBody(srcElement, bodyContainer) {
+    bodyContainer.innerHTML = '';
+    const sanitized = sanitizeBody(srcElement);
+    Array.from(sanitized.childNodes).forEach(n => bodyContainer.appendChild(n));
+    applyTcy(bodyContainer);
   }
 
   let currentMeta = extractMeta(document);
@@ -132,8 +209,7 @@
   `;
 
   const bodyContainer = root.querySelector('#vreader-body');
-  bodyContainer.appendChild(sourceBody.cloneNode(true));
-  applyTcy(bodyContainer);
+  replaceBody(sourceBody, bodyContainer);
 
   /* ===================================================================
      スタイル注入
@@ -171,21 +247,8 @@
       text-size-adjust: none;
     }
     #vreader-body { height: 100%; }
-    #vreader-body img { max-width: 80vh; max-height: 80vw; height: auto; }
-
-    /* 本文内の全ブロック要素の余白を強制消去 */
-    #vreader-body,
-    #vreader-body * {
-      margin: 0 !important;
-      padding: 0 !important;
-      border: 0 !important;
-    }
-    /* ruby の列幅を通常と同じに強制 */
-    #vreader-body ruby {
-      display: inline !important;
-      ruby-position: over;
-    }
-
+    #vreader-body p { margin: 0; text-indent: 1em; }
+    #vreader-body br { display: block; content: ""; }
     .vr-tcy { text-combine-upright: all; -webkit-text-combine: horizontal; }
 
     #vreader-end {
@@ -213,7 +276,7 @@
     .vr-end-nav .vr-next { font-weight: bold; }
     .vr-end-tip { text-align: center; font-size: .8em; opacity: .5; }
 
-    /* 見切れ隠しマスク（左右の余白を物理的に覆う） */
+    /* 見切れ隠しマスク */
     #vreader-mask-l, #vreader-mask-r {
       position: absolute;
       top: 0; bottom: 0;
@@ -307,45 +370,19 @@
   }
 
   /* ===================================================================
-     1列の幅を実測
-     =================================================================== */
-  function measureColumnWidth() {
-    const N = 20;
-    const test = document.createElement('div');
-    test.style.cssText = `
-      position: absolute;
-      left: -9999px; top: 0;
-      visibility: hidden;
-      writing-mode: vertical-rl;
-      font-size: ${cfg.font}px;
-      line-height: ${cfg.font + 14}px;
-      letter-spacing: 0.1em;
-      -webkit-text-size-adjust: none;
-      text-size-adjust: none;
-      height: 100px;
-      box-sizing: border-box;
-    `;
-    test.innerHTML = '<p style="margin:0;padding:0">a</p>'.repeat(N);
-    document.body.appendChild(test);
-    const width = test.scrollWidth;
-    document.body.removeChild(test);
-    const measured = width / N;
-    const fallback = cfg.font + 14;
-    return isFinite(measured) && measured > 0 ? measured : fallback;
-  }
-
-  /* ===================================================================
      ページ計測
      =================================================================== */
   function measure() {
     const parentWidth = root.clientWidth;
-    pageWidth = Math.floor(parentWidth * 0.8);  // frameと一致、列幅整数倍にしない
+    pageWidth = Math.floor(parentWidth * 0.8);
 
+    // frame を pageWidth ぴったりに、中央配置
     const sideMargin = (parentWidth - pageWidth) / 2;
     frame.style.left = sideMargin + 'px';
     frame.style.right = sideMargin + 'px';
     frame.style.width = pageWidth + 'px';
 
+    // マスク幅：余白 + 少しのバッファで見切れを覆う
     const maskWidth = sideMargin + 12;
     maskL.style.width = maskWidth + 'px';
     maskR.style.width = maskWidth + 'px';
@@ -363,7 +400,6 @@
     totalPages = bodyPages + 1;
     updateInfo();
   }
-  
 
   function updateInfo() {
     info.textContent = `${curPage + 1} / ${totalPages}`;
@@ -377,6 +413,19 @@
   }
 
   const isOnEndPage = () => curPage === totalPages - 1;
+
+  /* ===================================================================
+     再計測ヘルパー（リフロー完了を待ってから計測）
+     =================================================================== */
+  function deferredMeasure(afterFn) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        void bodyWrap.offsetHeight;
+        measure();
+        if (afterFn) afterFn();
+      });
+    });
+  }
 
   /* ===================================================================
      章末ページの更新
@@ -442,9 +491,7 @@
       const newBody = doc.querySelector(sel.body);
       if (!newBody) throw new Error('body not found');
 
-      bodyContainer.innerHTML = '';
-      bodyContainer.appendChild(newBody.cloneNode(true));
-      applyTcy(bodyContainer);
+      replaceBody(newBody, bodyContainer);
       applyFontStyles();
 
       currentMeta = extractMeta(doc);
@@ -453,16 +500,11 @@
       history.pushState({ vreader: true }, '', url);
       if (currentMeta.title) document.title = currentMeta.title;
 
-      bodyWrap.scrollTop = 0;
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          void bodyWrap.offsetHeight;
-          measure();
-          curPage = 0;
-          goTo(0);
-          loading.classList.remove('show');
-          loadingEpisode = false;
-        });
+      deferredMeasure(() => {
+        curPage = 0;
+        goTo(0);
+        loading.classList.remove('show');
+        loadingEpisode = false;
       });
 
     } catch (err) {
@@ -525,13 +567,7 @@
     applyFontStyles();
     root.dataset.theme = cfg.theme;
     saveCfg();
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        void bodyWrap.offsetHeight;
-        measure();
-        goTo(Math.min(curPage, totalPages - 1));
-      });
-    });
+    deferredMeasure(() => goTo(Math.min(curPage, totalPages - 1)));
   });
 
   /* ===================================================================
@@ -549,21 +585,14 @@
      起動 & リサイズ
      =================================================================== */
   applyFontStyles();
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      void bodyWrap.offsetHeight;
-      measure();
-      goTo(0);
-    });
-  });
+  deferredMeasure(() => goTo(0));
 
   let resizeTimer;
   window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       const ratio = totalPages > 0 ? curPage / totalPages : 0;
-      measure();
-      goTo(Math.round(ratio * totalPages));
+      deferredMeasure(() => goTo(Math.round(ratio * totalPages)));
     }, 200);
   });
 })();
