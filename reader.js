@@ -392,8 +392,8 @@
     if (!btn) return;
     const act = btn.dataset.act;
     e.stopPropagation();
-    if      (act === 'font-dec') cfg.font = Math.max(50, cfg.font - 50);
-    else if (act === 'font-inc') cfg.font = Math.min(500, cfg.font + 50);
+    if      (act === 'font-dec') cfg.font = Math.max(200, cfg.font - 50);
+    else if (act === 'font-inc') cfg.font = Math.min(1000, cfg.font + 50);
     else if (act === 'theme')    cfg.theme = (cfg.theme === 'light' ? 'dark' : 'light');
     else if (act === 'exit')     { location.reload(); return; }
     bodyWrap.style.fontSize = cfg.font + 'px';
