@@ -281,14 +281,20 @@
 
   /* -------- ページ計測 -------- */
   function measure() {
-    pageWidth = Math.floor(frame.clientWidth);  // 整数化
+    const frameWidth = Math.floor(frame.clientWidth);
+    const lineHeight = cfg.font + 14;  // 1列の幅
+    const columnsPerPage = Math.max(1, Math.floor(frameWidth / lineHeight));
+    pageWidth = columnsPerPage * lineHeight;  // 列幅の整数倍に丸める
+
     bodyWrap.style.minWidth = '';
+    bodyWrap.style.width = pageWidth + 'px';
     endPage.style.width = pageWidth + 'px';
-    void bodyWrap.offsetHeight;  // レイアウト確定を強制
+
+    void bodyWrap.offsetHeight;
     const w = bodyWrap.scrollWidth;
     bodyPages = Math.max(1, Math.ceil(w / pageWidth));
-    // +2pxの余裕で見切れ防止
-    bodyWrap.style.minWidth = (bodyPages * pageWidth + 2) + 'px';
+    bodyWrap.style.width = (bodyPages * pageWidth) + 'px';
+    bodyWrap.style.minWidth = (bodyPages * pageWidth) + 'px';
     totalPages = bodyPages + 1;
     updateInfo();
   }
