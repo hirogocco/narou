@@ -347,7 +347,7 @@
 
     void bodyWrap.offsetHeight;
     const w = bodyWrap.scrollWidth;
-    bodyPages = Math.max(1, Math.ceil(w / pageWidth));
+    bodyPages = Math.max(1, Math.ceil(w / pageWidth)) +1;
     const totalWidth = bodyPages * pageWidth;
     bodyWrap.style.width = totalWidth + 'px';
     bodyWrap.style.minWidth = totalWidth + 'px';
